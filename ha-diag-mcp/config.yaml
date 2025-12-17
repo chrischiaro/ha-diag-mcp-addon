@@ -13,11 +13,6 @@ arch:
   - armhf
   - i386
 
-ports:
-  3000/tcp: 3000
-ports_description:
-  3000/tcp: "MCP Streamable HTTP endpoint"
-
 homeassistant_api: true
 hassio_api: true
 hassio_role: default
@@ -34,7 +29,6 @@ schema:
 
 ports:
   3000/tcp: 3000
-
 ports_description:
   3000/tcp: "Home Automation Diagnostics MCP"
 
