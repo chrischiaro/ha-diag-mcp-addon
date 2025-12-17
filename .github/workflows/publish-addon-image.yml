@@ -1,0 +1,49 @@
+name: Publish HA add-on images (GHCR)
+
+on:
+  push:
+    branches: ["main"]
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute tags
+        id: vars
+        shell: bash
+        run: |
+          set -euo pipefail
+          SHORT_SHA="${GITHUB_SHA::7}"
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="edge"
+          fi
+          echo "short_sha=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Build & push (arches)
+        uses: home-assistant/builder@2025.11.0
+        with:
+          args: |
+            --amd64 \
+            --aarch64 \
+            --target . \
+            --image ghcr.io/chrischiaro/ha-diag-mcp-addon-{arch} \
+            --version ${{ steps.vars.outputs.version }} \
+            --additional-tag sha-${{ steps.vars.outputs.short_sha }}
