@@ -1,0 +1,43 @@
+name: "Home Automation Diagnostics MCP"
+slug: "ha_diag_mcp"
+description: "MCP server providing Home Assistant diagnostics tools over Streamable HTTP"
+version: "0.1.0"
+startup: application
+boot: auto
+init: false
+
+arch:
+  - amd64
+  - aarch64
+  - armv7
+  - armhf
+  - i386
+
+ports:
+  3000/tcp: 3000
+ports_description:
+  3000/tcp: "MCP Streamable HTTP endpoint"
+
+homeassistant_api: true
+hassio_api: true
+hassio_role: default
+
+map:
+  - addon_config:rw
+
+options:
+  log_level: info
+  allow_origin: "*"
+schema:
+  log_level: list(trace|debug|info|warn|error)
+  allow_origin: str
+
+ports:
+  3000/tcp: 3000
+
+ports_description:
+  3000/tcp: "Home Automation Diagnostics MCP"
+
+host_network: false
+
+image: "ghcr.io/chrischiaro/ha-diag-mcp-{arch}"
