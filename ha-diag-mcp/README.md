@@ -1,5 +1,7 @@
 # HA Diagnostics MCP
-### ha-diag-mcp
+
+## ha-diag-mcp
+
 Diagnostic MCP server for Home Assistant.
 
 - `server/` – TypeScript MCP server (Streamable HTTP)
