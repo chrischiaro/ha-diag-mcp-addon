@@ -1,7 +1,7 @@
 name: "Home Automation Diagnostics MCP"
 slug: "ha_diag_mcp"
 description: "MCP server providing Home Assistant diagnostics tools over Streamable HTTP"
-version: "0.1.0"
+version: "0.1.1"
 startup: application
 boot: auto
 init: false
@@ -31,4 +31,4 @@ ports_description:
 
 host_network: false
 
-image: "ghcr.io/chrischiaro/ha-diag-mcp-addon-{arch}"
+image: "ghcr.io/chrischiaro/ha-diag-mcp-addon-public-{arch}"
