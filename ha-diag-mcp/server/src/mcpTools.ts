@@ -16,7 +16,7 @@ import {
   toIsoFromMillis,
 } from "./ha.js";
 
-// Heuristic: normalize traces into an array and pick a “most recent”
+// Heuristic: normalize traces into an array and pick a "most recent"
 function pickMostRecentTrace(traces: any): any | null {
   if (!traces) return null;
 
@@ -88,7 +88,7 @@ export function registerTools(mcp: McpServer) {
   defineTool(mcp, {
     name: "ha_get_state",
     description: "Get the current state and attributes of a Home Assistant entity by entity_id.",
-    params: { entity_id: z.string().min(1) },
+    params: { entity_id: z.string().min(1).describe("The entity_id to query (e.g., 'light.living_room')") },
     handler: async ({ entity_id }) => ({ state: await haState(entity_id) }),
   });
 
@@ -107,7 +107,7 @@ export function registerTools(mcp: McpServer) {
   defineTool(mcp, {
     name: "diagnose_entity",
     description: "Return a compact diagnostic summary for an entity, including availability and last update times.",
-    params: { entity_id: z.string().min(1) },
+    params: { entity_id: z.string().min(1).describe("The entity_id to diagnose") },
     handler: async ({ entity_id }) => {
       const s: any = await haState(entity_id);
       return {
@@ -131,13 +131,13 @@ export function registerTools(mcp: McpServer) {
     description:
       "Explain why a Home Assistant automation did or did not run in a given time window, using automation state, traces, and logbook/history context.",
     params: {
-      automation_entity_id: z.string().min(1),
-      since_hours: z.number().min(1).max(168).optional(),
-      include_logbook: z.boolean().optional(),
-      include_history: z.boolean().optional(),
-      include_raw_traces: z.boolean().optional(),
-      include_config: z.boolean().optional(),
-      include_raw_config: z.boolean().optional(),
+      automation_entity_id: z.string().min(1).describe("The automation entity_id to diagnose"),
+      since_hours: z.number().min(1).max(168).optional().describe("Number of hours to look back (default: 24, max: 168)"),
+      include_logbook: z.boolean().optional().describe("Include logbook entries (default: true)"),
+      include_history: z.boolean().optional().describe("Include history data (default: false)"),
+      include_raw_traces: z.boolean().optional().describe("Include raw trace data (default: false)"),
+      include_config: z.boolean().optional().describe("Include automation configuration (default: true)"),
+      include_raw_config: z.boolean().optional().describe("Include unredacted configuration (default: false)"),
     },
     handler: async ({
       automation_entity_id,
@@ -235,7 +235,7 @@ export function registerTools(mcp: McpServer) {
     name: "ha_get_automation_config",
     description:
       "Fetch the full automation configuration (triggers, conditions, actions) for a given automation entity_id.",
-    params: { automation_entity_id: z.string().min(1) },
+    params: { automation_entity_id: z.string().min(1).describe("The automation entity_id") },
     handler: async ({ automation_entity_id }) => ({
       config: await haAutomationConfig(automation_entity_id),
     }),
@@ -245,7 +245,7 @@ export function registerTools(mcp: McpServer) {
     name: "ha_get_automation_yaml_snippet",
     description:
       "Return a YAML-like snippet for an automation (trigger/condition/action/mode/etc). Use this instead of asking the user to open automations.yaml.",
-    params: { automation_entity_id: z.string().min(1) },
+    params: { automation_entity_id: z.string().min(1).describe("The automation entity_id") },
     handler: async ({ automation_entity_id }) => {
       const cfg = await haAutomationConfig(automation_entity_id);
       const safe = sanitizeAutomationConfig(cfg);
@@ -259,10 +259,10 @@ export function registerTools(mcp: McpServer) {
     description:
       "Search Home Assistant entities by query (matches entity_id and friendly_name). Use this to find the right entity_id before diagnosing automations or entities.",
     params: {
-      query: z.string().min(1),
-      domains: z.array(z.string().min(1)).optional(),
-      limit: z.number().min(1).max(50).optional(),
-      include_disabled: z.boolean().optional(),
+      query: z.string().min(1).describe("Search query to match against entity_id and friendly_name"),
+      domains: z.array(z.string().min(1)).optional().describe("Optional array of domains to filter by (e.g., ['automation', 'light'])"),
+      limit: z.number().min(1).max(50).optional().describe("Maximum number of results to return (default: 10, max: 50)"),
+      include_disabled: z.boolean().optional().describe("Include disabled entities (default: false)"),
     },
     handler: async ({ query, domains, limit }) => {
       const q = query.toLowerCase().trim();
@@ -301,8 +301,8 @@ export function registerTools(mcp: McpServer) {
     name: "ha_list_entities",
     description: "List Home Assistant entities, optionally filtered by domain (e.g. automation, light, sensor).",
     params: {
-      domain: z.string().min(1).optional(),
-      limit: z.number().min(1).max(500).optional(),
+      domain: z.string().min(1).optional().describe("Optional domain filter (e.g., 'automation', 'light', 'sensor')"),
+      limit: z.number().min(1).max(500).optional().describe("Maximum number of results (default: 100, max: 500)"),
     },
     handler: async ({ domain, limit }) => {
       const lim = limit ?? 100;
@@ -329,14 +329,13 @@ export function registerTools(mcp: McpServer) {
   defineTool(mcp, {
     name: "ha_get_automation_yaml_definition",
     description: "Fetch the YAML definition of an automation by item id (fallback for YAML-managed automations).",
-    params: { automation_entity_id: z.string().min(1) },
+    params: { automation_entity_id: z.string().min(1).describe("The automation entity_id or item id") },
     handler: async ({ automation_entity_id }) => {
       const addonUrl = process.env.HA_DIAG_ADDON_URL;
       if (!addonUrl) {
-        return {
-          error:
-            "HA_DIAG_ADDON_URL is not set. Point it to your HAOS add-on base URL (e.g. http://<ha-ip>:<port>).",
-        };
+        throw new Error(
+          "HA_DIAG_ADDON_URL is not set. Point it to your HAOS add-on base URL (e.g. http://<ha-ip>:<port>)."
+        );
       }
 
       const itemId = automation_entity_id.startsWith("automation.")
@@ -344,10 +343,13 @@ export function registerTools(mcp: McpServer) {
         : automation_entity_id;
 
       const r = await fetch(`${addonUrl}/yaml/automation/${encodeURIComponent(itemId)}`);
+
+      if (!r.ok) {
+        const body = await r.text();
+        throw new Error(`Add-on returned ${r.status}: ${body}`);
+      }
+
       const body = await r.text();
-
-      if (!r.ok) return { error: `Add-on returned ${r.status}`, body };
-
       return { yaml_definition: JSON.parse(body) };
     },
   });

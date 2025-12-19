@@ -72,7 +72,10 @@ export async function haGet(path: string) {
   const headers = supervisorMode() ? supervisorHeaders() : haDirectHeaders();
 
   const res = await fetch(url, { headers });
-  if (!res.ok) throw new Error(`HA GET ${path} failed: ${res.status} ${await res.text()}`);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`HA GET ${path} failed: ${res.status} ${res.statusText}${text ? ` - ${text}` : ''}`);
+  }
   return res.json();
 }
 
@@ -91,7 +94,10 @@ export async function haServices() {
 export async function supervisorHostInfo() {
   if (!supervisorMode()) throw new Error("Supervisor API only available in Supervisor mode.");
   const res = await fetch("http://supervisor/host/info", { headers: supervisorHeaders() });
-  if (!res.ok) throw new Error(`Supervisor host info failed: ${res.status} ${await res.text()}`);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Supervisor host info failed: ${res.status} ${res.statusText}${text ? ` - ${text}` : ''}`);
+  }
   return res.json();
 }
 

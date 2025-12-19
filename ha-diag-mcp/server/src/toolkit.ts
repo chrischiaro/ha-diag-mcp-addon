@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 
 export type ToolParams = Record<string, z.ZodTypeAny>;
 export type ToolHandler<P extends ToolParams, R extends Record<string, unknown>> =
@@ -27,7 +28,8 @@ export function defineTool<P extends ToolParams, R extends Record<string, unknow
     handler: ToolHandler<P, R>;
   }
 ) {
-  const params = (spec.params ?? {}) as P;
+  // Use proper Zod object schema even when empty
+  const params = spec.params ? z.object(spec.params) : z.object({});
   const annotations = spec.title ? { title: spec.title } : {};
 
   const cb = (async (args: any, _extra: any) => {
@@ -35,10 +37,17 @@ export function defineTool<P extends ToolParams, R extends Record<string, unknow
       const out = await spec.handler(args);
       return okJson(out);
     } catch (e: any) {
-      return okJson({
-        tool: spec.name,
-        error: String(e?.message ?? e),
-      });
+      // Throw MCP-specific errors instead of wrapping in successful response
+      // This allows the MCP client to properly handle errors
+      if (e instanceof McpError) {
+        throw e;
+      }
+
+      // Convert generic errors to MCP errors with proper error codes
+      throw new McpError(
+        ErrorCode.InternalError,
+        `Tool '${spec.name}' failed: ${String(e?.message ?? e)}`
+      );
     }
   }) as any;
 
