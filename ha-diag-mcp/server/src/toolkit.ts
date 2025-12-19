@@ -50,5 +50,5 @@ export function defineTool<P extends ToolParams, R extends Record<string, unknow
     }
   }) as any;
 
-  return (mcp.tool as any)(spec.name, spec.description, params, annotations, cb);
+  return (mcp.tool as any)(spec.name, spec.description, params, cb);
 }
