@@ -14,7 +14,6 @@ export function okJson(data) {
 export function defineTool(mcp, spec) {
     // Use proper Zod object schema even when empty
     const params = spec.params ? z.object(spec.params) : z.object({});
-    const annotations = spec.title ? { title: spec.title } : {};
     const cb = (async (args, _extra) => {
         try {
             const out = await spec.handler(args);
@@ -30,6 +29,9 @@ export function defineTool(mcp, spec) {
             throw new McpError(ErrorCode.InternalError, `Tool '${spec.name}' failed: ${String(e?.message ?? e)}`);
         }
     });
-    // Always use the 5-arg overload: (name, description, paramsSchema, annotations, cb)
-    return mcp.tool(spec.name, spec.description, params, annotations, cb);
+    // Use the common 4-arg overload: (name, description, paramsSchema, cb)
+    // Passing an annotations object here can shift arguments at runtime and break older/newer SDK builds.
+    // If you need a UI title, include it in the description for now.
+    const description = spec.title ? `${spec.title}: ${spec.description}` : spec.description;
+    return mcp.tool(spec.name, description, params, cb);
 }

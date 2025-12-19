@@ -30,7 +30,6 @@ export function defineTool<P extends ToolParams, R extends Record<string, unknow
 ) {
   // Use proper Zod object schema even when empty
   const params = spec.params ? z.object(spec.params) : z.object({});
-  const annotations = spec.title ? { title: spec.title } : {};
 
   const cb = (async (args: any, _extra: any) => {
     try {
@@ -51,6 +50,9 @@ export function defineTool<P extends ToolParams, R extends Record<string, unknow
     }
   }) as any;
 
-  // Always use the 5-arg overload: (name, description, paramsSchema, annotations, cb)
-  return (mcp.tool as any)(spec.name, spec.description, params, annotations, cb);
+  // Use the common 4-arg overload: (name, description, paramsSchema, cb)
+  // Passing an annotations object here can shift arguments at runtime and break older/newer SDK builds.
+  // If you need a UI title, include it in the description for now.
+  const description = spec.title ? `${spec.title}: ${spec.description}` : spec.description;
+  return (mcp.tool as any)(spec.name, description, params, cb);
 }
