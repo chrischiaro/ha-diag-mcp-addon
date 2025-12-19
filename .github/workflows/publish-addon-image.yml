@@ -43,6 +43,6 @@ jobs:
             --amd64 \
             --aarch64 \
             --target ha-diag-mcp \
-            --image chrischiaro/ha-diag-mcp-addon-{arch} \
-            --version ${{ steps.vars.outputs.version }} \
-            --additional-tag sha-${{ steps.vars.outputs.short_sha }}
+            --docker-hub chrischiaro \
+            --addon \
+            --version ${{ steps.vars.outputs.version }}
