@@ -8,7 +8,14 @@ export LOG_LEVEL
 export ALLOW_ORIGIN
 
 bashio::log.info "Starting HA Diagnostics MCP (log_level=${LOG_LEVEL})"
-node /app/server/dist/index.js
 
-ls -al /app/server/dist
-node -p "require('fs').readFileSync('/app/server/dist/toolkit.js', 'utf8').slice(-300)"
+bashio::log.info "Dist listing:"
+ls -al /app/server/dist || true
+
+bashio::log.info "toolkit.js tail:"
+node -p "require('fs').readFileSync('/app/server/dist/toolkit.js','utf8').slice(-400)" || true
+
+bashio::log.info "toolkit.js mcp.tool call lines:"
+grep -n "mcp.tool" /app/server/dist/toolkit.js || true
+
+node /app/server/dist/index.js
