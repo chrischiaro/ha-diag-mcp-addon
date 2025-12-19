@@ -9,3 +9,6 @@ export ALLOW_ORIGIN
 
 bashio::log.info "Starting HA Diagnostics MCP (log_level=${LOG_LEVEL})"
 node /app/server/dist/index.js
+
+ls -al /app/server/dist
+node -p "require('fs').readFileSync('/app/server/dist/toolkit.js', 'utf8').slice(-300)"

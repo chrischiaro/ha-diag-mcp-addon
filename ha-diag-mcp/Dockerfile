@@ -11,6 +11,10 @@ WORKDIR /app
 COPY server/package.json /app/server/package.json
 COPY server/tsconfig.json /app/server/tsconfig.json
 
+# ✅ add these; include other tsconfig files if needed
+COPY server/tsconfig.* /app/server/
+COPY server/src /app/server/src
+
 WORKDIR /app/server
 RUN npm install --omit=dev
 
@@ -19,6 +23,7 @@ COPY server/src /app/server/src
 
 RUN npm install --include=dev \
   && npm run build \
+  && test -f ./dist/index.js \
   && npm prune --omit=dev
 
 # Add-on runner
