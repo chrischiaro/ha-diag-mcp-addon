@@ -31,4 +31,4 @@ ports_description:
 
 host_network: false
 
-image: "chrischiaro/ha-diag-mcp-addon-{arch}:latest"
+image: "chrischiaro/ha-diag-mcp-addon-{arch}"
