@@ -28,21 +28,15 @@ export function defineTool<P extends ToolParams, R extends Record<string, unknow
     handler: ToolHandler<P, R>;
   }
 ) {
-  const params = spec.params ? z.object(spec.params) : z.object({});
-  const annotations = spec.title ? { title: spec.title } : {};
+  // Pass the Zod *shape object* (not z.object(...))
+  const shape = (spec.params ?? {}) as any;
 
-  const cb = (async (args: any, _extra: any) => {
+  const cb = (async (args: any) => {
     try {
       const out = await spec.handler(args);
       return okJson(out);
     } catch (e: any) {
-      // Throw MCP-specific errors instead of wrapping in successful response
-      // This allows the MCP client to properly handle errors
-      if (e instanceof McpError) {
-        throw e;
-      }
-
-      // Convert generic errors to MCP errors with proper error codes
+      if (e instanceof McpError) throw e;
       throw new McpError(
         ErrorCode.InternalError,
         `Tool '${spec.name}' failed: ${String(e?.message ?? e)}`
@@ -50,5 +44,6 @@ export function defineTool<P extends ToolParams, R extends Record<string, unknow
     }
   }) as any;
 
-  return (mcp.tool as any)(spec.name, spec.description, params, cb);
+  // Signature: (name, schemaShape, handler) or (name, description, schemaShape, handler)
+  return (mcp.tool as any)(spec.name, spec.description, shape, cb);
 }
