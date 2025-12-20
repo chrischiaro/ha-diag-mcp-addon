@@ -1,0 +1,130 @@
+ha_diag_get_state:
+  alias: "HA Diag: Get state"
+  mode: queued
+  fields:
+    entity_id:
+      description: Entity ID (e.g. sensor.temperature)
+      example: "sensor.screek_human_sensor_l13_40fe3c_esp_uptime"
+      required: true
+      selector:
+        text:
+  sequence:
+    - event: ha_diag_result
+      event_data:
+        title: "HA Diag: Get state"
+        text: >-
+          {% set eid = entity_id | trim %}
+          {% set s = states[eid] if eid in states else none %}
+          {% if not s %}
+          {{ {"error":"Entity not found","entity_id":eid} | tojson }}
+          {% else %}
+          {{ {
+            "entity_id": eid,
+            "state": s.state,
+            "attributes": s.attributes,
+            "last_changed": s.last_changed,
+            "last_updated": s.last_updated
+          } | tojson }}
+          {% endif %}
+
+ha_diag_list_services:
+  alias: "HA Diag: List services"
+  mode: queued
+  sequence:
+    - event: ha_diag_result
+      event_data:
+        title: "HA Diag: List services"
+        text: >-
+          {% set out = {} %}
+          {% for domain in services | sort %}
+            {% set _ = out.update({ domain: (services[domain].keys() | list | sort) }) %}
+          {% endfor %}
+          {{ out | tojson }}
+
+ha_diag_find_entities:
+  alias: "HA Diag: Find entities"
+  mode: queued
+  fields:
+    query:
+      description: Search string (matches entity_id + friendly_name)
+      required: true
+      selector:
+        text:
+    domains:
+      description: Optional comma-separated domains (e.g. sensor,light,automation)
+      required: false
+      selector:
+        text:
+    limit:
+      description: Max results (default 20)
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 100
+          mode: slider
+  sequence:
+    - event: ha_diag_result
+      event_data:
+        title: "HA Diag: Find entities"
+        text: >-
+          {% set q = query | lower | trim %}
+          {% set lim = (limit | default(20)) | int %}
+          {% set doms = (domains | default('') | lower | replace(' ', '')) %}
+          {% set dom_list = doms.split(',') if doms else [] %}
+          {% set results = [] %}
+
+          {% for s in states %}
+            {% set eid = s.entity_id | lower %}
+            {% set name = s.attributes.friendly_name if s.attributes is defined else '' %}
+            {% set d = eid.split('.')[0] %}
+            {% if (not dom_list or d in dom_list) and (q in eid or q in name | lower) %}
+              {% set _ = results.append({
+                "entity_id": s.entity_id,
+                "domain": d,
+                "name": name,
+                "state": s.state,
+                "device_class": s.attributes.device_class if s.attributes is defined else none,
+                "unit": s.attributes.unit_of_measurement if s.attributes is defined else none
+              }) %}
+            {% endif %}
+            {% if results | length >= lim %}{% break %}{% endif %}
+          {% endfor %}
+          {{ {"query": query, "count": results | length, "results": results} | tojson }}
+
+ha_diag_list_entities:
+  alias: "HA Diag: List entities"
+  mode: queued
+  fields:
+    domain:
+      description: Optional domain (sensor/light/automation/etc)
+      required: false
+      selector:
+        text:
+    limit:
+      description: Max results (default 100)
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 500
+          mode: slider
+  sequence:
+    - event: ha_diag_result
+      event_data:
+        title: "HA Diag: List entities"
+        text: >-
+          {% set dom = (domain | default('')) | lower | trim %}
+          {% set lim = (limit | default(100)) | int %}
+          {% set results = [] %}
+          {% for s in states %}
+            {% if not dom or s.entity_id.startswith(dom ~ '.') %}
+              {% set _ = results.append({
+                "entity_id": s.entity_id,
+                "name": s.attributes.friendly_name if s.attributes is defined else none,
+                "state": s.state
+              }) %}
+            {% endif %}
+            {% if results | length >= lim %}{% break %}{% endif %}
+          {% endfor %}
+          {{ {"domain": (dom if dom else none), "count": results | length, "results": results} | tojson }}

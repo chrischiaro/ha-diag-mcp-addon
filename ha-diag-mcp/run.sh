@@ -12,9 +12,4 @@ bashio::log.info "Starting HA Diagnostics MCP v$(bashio::addon.version) (log_lev
 bashio::log.info "Dist listing:"
 ls -al /app/server/dist || true
 
-bashio::log.info "toolkit.js tail -c 800 /app/server/dist/toolkit.js" || true
-
-bashio::log.info "toolkit.js mcp.tool call lines:"
-grep -n "mcp.tool" /app/server/dist/toolkit.js || true
-
 node /app/server/dist/index.js
