@@ -12,8 +12,9 @@ bashio::log.info "Starting HA Diagnostics MCP (log_level=${LOG_LEVEL})"
 bashio::log.info "Dist listing:"
 ls -al /app/server/dist || true
 
-bashio::log.info "toolkit.js tail:"
-node -p "require('fs').readFileSync('/app/server/dist/toolkit.js','utf8').slice(-400)" || true
+bashio::log.info "toolkit.js head -c 800 /app/server/dist/toolkit.js" || true
+
+bashio::log.info "Starting HA Diagnostics MCP v$(bashio::addon.version) (log_level=${LOG_LEVEL})"
 
 bashio::log.info "toolkit.js mcp.tool call lines:"
 grep -n "mcp.tool" /app/server/dist/toolkit.js || true

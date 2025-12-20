@@ -33,7 +33,25 @@ export function defineTool<P extends ToolParams, R extends Record<string, unknow
 
   const cb = (async (args: any) => {
     try {
-      const out = await spec.handler(args);
+      // Normalize args from various MCP clients:
+      // - Some pass tool args directly
+      // - Some nest as { arguments: {...} }
+      // - Some use camelCase instead of snake_case
+      let normalized: any = args ?? {};
+      if (normalized && typeof normalized === "object" && normalized.arguments && typeof normalized.arguments === "object") {
+        normalized = normalized.arguments;
+      }
+
+      if (spec.params && normalized && typeof normalized === "object") {
+        for (const key of Object.keys(spec.params)) {
+          if (normalized[key] !== undefined) continue;
+          const camel = key.replace(/_([a-z])/g, (_: any, c: string) => c.toUpperCase());
+          if (normalized[camel] !== undefined) normalized[key] = normalized[camel];
+        }
+      }
+
+      const out = await spec.handler(normalized);
+
       return okJson(out);
     } catch (e: any) {
       if (e instanceof McpError) throw e;
