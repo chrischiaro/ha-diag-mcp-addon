@@ -1,7 +1,7 @@
 name: "Home Automation Diagnostics MCP"
 slug: "ha_diag_mcp"
 description: "MCP server providing Home Assistant diagnostics tools over Streamable HTTP"
-version: "0.1.16"
+version: "0.1.17"
 startup: application
 boot: auto
 init: false
