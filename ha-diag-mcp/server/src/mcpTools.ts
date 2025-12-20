@@ -245,12 +245,21 @@ export function registerTools(mcp: McpServer) {
     name: "ha_get_automation_yaml_snippet",
     description:
       "Return a YAML-like snippet for an automation (trigger/condition/action/mode/etc). Use this instead of asking the user to open automations.yaml.",
-    params: { automation_entity_id: z.string().min(1).describe("The automation entity_id") },
-    handler: async ({ automation_entity_id }) => {
+    params: {
+      automation_entity_id: z.string().min(1).describe("The automation entity_id"),
+      include_raw_config: z.boolean().optional().describe("Return unredacted config (default: false)"),
+    },
+    handler: async ({ automation_entity_id, include_raw_config }) => {
       const cfg = await haAutomationConfig(automation_entity_id);
-      const safe = sanitizeAutomationConfig(cfg);
-      const snippet = yaml.dump(safe, { noRefs: true, lineWidth: 120 });
-      return { automation: automation_entity_id, yaml_snippet: snippet };
+      const useRaw = include_raw_config ?? false;
+
+      const data = useRaw ? cfg : sanitizeAutomationConfig(cfg);
+      const snippet = yaml.dump(data, { noRefs: true, lineWidth: 120 });
+
+      return {
+        structuredContent: { automation: automation_entity_id, yaml_snippet: snippet, raw: useRaw },
+        content: [{ type: "text", text: snippet }],
+      };
     },
   });
 

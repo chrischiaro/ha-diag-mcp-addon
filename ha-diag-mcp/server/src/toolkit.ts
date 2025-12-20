@@ -52,7 +52,13 @@ export function defineTool<P extends ToolParams, R extends Record<string, unknow
 
       const out = await spec.handler(normalized);
 
+      // If a tool already returns a valid MCP tool result, pass it through
+      if (out && typeof out === "object" && Array.isArray(out.content)) {
+        return out;
+      }
+
       return okJson(out);
+
     } catch (e: any) {
       if (e instanceof McpError) throw e;
       throw new McpError(
