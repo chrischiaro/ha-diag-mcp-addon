@@ -1,10 +1,9 @@
-import { z } from "zod";
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 export function okJson(data) {
-    return {
-        structuredContent: data,
-        content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
-    };
+  return {
+    structuredContent: data,
+    content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
+  };
 }
 /**
  * sdk@1.10.2 has tricky overload/generic inference for mcp.tool().
@@ -12,26 +11,47 @@ export function okJson(data) {
  * to avoid TS2345 on BaseToolCallback.
  */
 export function defineTool(mcp, spec) {
-    // Use proper Zod object schema even when empty
-    const params = spec.params ? z.object(spec.params) : z.object({});
-    const cb = (async (args, _extra) => {
-        try {
-            const out = await spec.handler(args);
-            return okJson(out);
+  // Pass the Zod *shape object* (not z.object(...))
+  const shape = spec.params ?? {};
+  const cb = async (args) => {
+    try {
+      // Normalize args from various MCP clients:
+      // - Some pass tool args directly
+      // - Some nest as { arguments: {...} }
+      // - Some use camelCase instead of snake_case
+      let normalized = args ?? {};
+      if (
+        normalized &&
+        typeof normalized === "object" &&
+        normalized.arguments &&
+        typeof normalized.arguments === "object"
+      ) {
+        normalized = normalized.arguments;
+      }
+      if (spec.params && normalized && typeof normalized === "object") {
+        for (const key of Object.keys(spec.params)) {
+          if (normalized[key] !== undefined) continue;
+          const camel = key.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+          if (normalized[camel] !== undefined)
+            normalized[key] = normalized[camel];
         }
-        catch (e) {
-            // Throw MCP-specific errors instead of wrapping in successful response
-            // This allows the MCP client to properly handle errors
-            if (e instanceof McpError) {
-                throw e;
-            }
-            // Convert generic errors to MCP errors with proper error codes
-            throw new McpError(ErrorCode.InternalError, `Tool '${spec.name}' failed: ${String(e?.message ?? e)}`);
-        }
-    });
-    // Use the common 4-arg overload: (name, description, paramsSchema, cb)
-    // Passing an annotations object here can shift arguments at runtime and break older/newer SDK builds.
-    // If you need a UI title, include it in the description for now.
-    const description = spec.title ? `${spec.title}: ${spec.description}` : spec.description;
-    return mcp.tool(spec.name, description, params, cb);
+      }
+      const out: any = await spec.handler(normalized);
+
+      // If a tool already returns a valid MCP tool result, pass it through
+      if (out && typeof out === "object" && Array.isArray(out.content)) {
+        return out;
+      }
+
+      return okJson(out);
+    } catch (e) {
+      if (e instanceof McpError) throw e;
+      throw new McpError(
+        ErrorCode.InternalError,
+        `Tool '${spec.name}' failed: ${String(e?.message ?? e)}`
+      );
+    }
+  };
+  // Signature: (name, schemaShape, handler) or (name, description, schemaShape, handler)
+  return mcp.tool(spec.name, spec.description, shape, cb);
 }

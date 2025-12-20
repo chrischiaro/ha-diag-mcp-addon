@@ -21,6 +21,11 @@ function log(...args) {
 const app = express();
 app.use(express.json({ limit: "1mb" }));
 app.use(cors({ origin: ALLOW_ORIGIN }));
+app.use((err, _req, _res, _next) => {
+    console.error("express error:", err);
+});
+process.on("uncaughtException", (e) => console.error("uncaughtException:", e));
+process.on("unhandledRejection", (e) => console.error("unhandledRejection:", e));
 const mcp = new McpServer({
     name: "home-automation-diagnostics",
     version: "0.1.0",
@@ -138,6 +143,8 @@ async function getOrCreateTransport(req, res) {
     res.status(400).json({ error: "Bad Request: missing session or not an initialize request" });
     return null;
 }
+app.get("/", (_req, res) => res.status(200).json({ ok: true, message: "Home Automation Diagnostics MCP is running." }));
+app.get("/health", (_req, res) => res.status(200).json({ ok: true }));
 app.post("/mcp", async (req, res) => {
     const t = await getOrCreateTransport(req, res);
     if (!t)
