@@ -8,6 +8,7 @@ import {
   haAutomationTraces,
   haLogbook,
   haHistoryPeriod,
+  haRepairsListIssues,
   haServices,
   haState,
   haStates,
@@ -360,6 +361,39 @@ export function registerTools(mcp: McpServer) {
 
       const body = await r.text();
       return { yaml_definition: JSON.parse(body) };
+    },
+  });
+
+  defineTool(mcp, {
+    name: "ha_list_repairs",
+    description: "List current Home Assistant Repairs (Settings → Repairs).",
+    params: {
+      include_raw: z.boolean().optional().describe("Include raw issue payloads (default: false)"),
+      limit: z.number().min(1).max(500).optional().describe("Max issues to return (default: 200)"),
+    },
+    handler: async ({ include_raw, limit }) => {
+      const raw = await haRepairsListIssues(); // { issues: [...] }
+      const issues = (raw?.issues ?? []).slice(0, limit ?? 200).map((i: any) => ({
+        domain: i.domain ?? null,
+        issue_id: i.issue_id ?? null,
+        severity: i.severity ?? null,
+        is_fixable: i.is_fixable ?? null,
+        is_persistent: i.is_persistent ?? null,
+        created: i.created ?? i.created_at ?? null,
+        breaks_in_ha_version: i.breaks_in_ha_version ?? null,
+        learn_more_url: i.learn_more_url ?? null,
+        translation_key: i.translation_key ?? null,
+        translation_placeholders: i.translation_placeholders ?? null,
+        // Some builds also include flags like ignored/dismissed depending on version/internals
+        ignored: i.ignored ?? null,
+        dismissed: i.dismissed ?? null,
+      }));
+
+      return {
+        count: issues.length,
+        issues,
+        raw: include_raw ? raw : undefined,
+      };
     },
   });
 }

@@ -1,3 +1,5 @@
+import WebSocket from "ws";
+
 const SUPERVISOR_TOKEN = process.env.SUPERVISOR_TOKEN;
 
 const HA_BASE_URL = process.env.HA_BASE_URL; // http://<HA-IP>:8123
@@ -152,6 +154,70 @@ export async function haAutomationConfig(entityId: string) {
   return haGet(`/config/automation/config/${encodeURIComponent(itemId)}`);
 }
 
+/* WebSocket to HA */
+function wsUrl() {
+  // Prefer supervisor proxy when running as add-on
+  if (supervisorMode()) return "ws://supervisor/core/api/websocket";
+
+  if (!HA_BASE_URL) throw new Error("HA_BASE_URL missing for local mode.");
+  return HA_BASE_URL.replace(/^http/, "ws") + "/api/websocket";
+}
+
+function wsAuthToken() {
+  // Prefer explicit HA token; fall back to supervisor token in add-on mode
+  if (HA_TOKEN) return HA_TOKEN;
+  if (SUPERVISOR_TOKEN) return SUPERVISOR_TOKEN;
+  throw new Error("Need HA_TOKEN or SUPERVISOR_TOKEN to auth WebSocket.");
+}
+
+// Minimal WS command helper (connect → auth → send → await result)
+async function haWsCommand<T = any>(payload: Record<string, any>): Promise<T> {
+  const url = wsUrl();
+  const token = wsAuthToken();
+
+  return await new Promise<T>((resolve, reject) => {
+    const ws = new WebSocket(url);
+    let msgId = 1;
+    const id = ++msgId;
+
+    const cleanup = (err?: any) => {
+      try { ws.close(); } catch { }
+      if (err) reject(err);
+    };
+
+    ws.on("open", () => {
+      // 1) auth
+      ws.send(JSON.stringify({ type: "auth", access_token: token }));
+      // 2) command
+      ws.send(JSON.stringify({ id, ...payload }));
+    });
+
+    ws.on("message", (buf: Buffer) => {
+      let msg: Record<string, any>;
+      try { msg = JSON.parse(buf.toString()); } catch { return; }
+
+      // auth ok/fail
+      if (msg?.type === "auth_invalid") return cleanup(new Error("WS auth_invalid"));
+      if (msg?.type === "auth_ok") return;
+
+      // command result
+      if (msg?.id === id) {
+      if (msg?.success) resolve(msg.result as T);
+      else cleanup(new Error(msg?.error?.message ?? "WS command failed"));
+      }
+    });
+
+    ws.on("error", cleanup);
+    ws.on("close", () => cleanup(new Error("WebSocket closed before result")));
+  });
+}
+
+export async function haRepairsListIssues() {
+  // This is the “Repairs” list in Settings
+  return haWsCommand<{ issues: any[] }>({ type: "repairs/list_issues" });
+}
+
+/* Helper functions */
 export function toIsoFromMillis(epochMs: number): string {
   return new Date(epochMs).toISOString();
 }
