@@ -62,6 +62,8 @@ template:
             ```
             {% endif %}
           ts: "{{ now().isoformat() }}"
+
+python_script:
 ```
 
 3. Create helpers (**Settings** > **Devices & services** > **Helpers** > **Create Helper** (button)):

@@ -1,0 +1,54 @@
+title: HA Diagnostics
+path: ha-diagnostics
+icon: mdi:stethoscope
+cards:
+  - type: entities
+    title: Inputs
+    entities:
+      - entity: input_text.ha_diag_entity_id
+        name: Entity ID
+      - entity: input_text.ha_diag_query
+        name: Search query
+      - entity: input_text.ha_diag_domains
+        name: Domains (comma)
+      - entity: input_text.ha_diag_domain
+        name: Domain
+      - entity: input_number.ha_diag_limit
+        name: Limit
+
+  - type: grid
+    title: Run
+    columns: 2
+    square: false
+    cards:
+      - type: button
+        name: Get state
+        icon: mdi:database-search
+        tap_action:
+          action: more-info
+          entity: script.ha_diag_get_state
+      - type: button
+        name: Find entities
+        icon: mdi:magnify
+        tap_action:
+          action: more-info
+          entity: script.ha_diag_find_entities
+      - type: button
+        name: List entities
+        icon: mdi:format-list-bulleted
+        tap_action:
+          action: more-info
+          entity: script.ha_diag_list_entities
+      - type: button
+        name: List services
+        icon: mdi:cog-outline
+        tap_action:
+          action: more-info
+          entity: script.ha_diag_list_services
+
+  - type: markdown
+    title: Result
+    content: >-
+      {{ state_attr('sensor.ha_diag_last_result','formatted')
+         or state_attr('sensor.ha_diag_last_result','full_text')
+         or 'No results yet.' }}

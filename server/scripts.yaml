@@ -7,7 +7,7 @@ ha_diag_get_state:
       example: "sensor.screek_human_sensor_l13_40fe3c_esp_uptime"
       required: true
       selector:
-        text:
+        entity: {}
   sequence:
     - event: ha_diag_result
       event_data:
@@ -31,15 +31,7 @@ ha_diag_list_services:
   alias: "HA Diag: List services"
   mode: queued
   sequence:
-    - event: ha_diag_result
-      event_data:
-        title: "HA Diag: List services"
-        text: >-
-          {% set out = {} %}
-          {% for domain in services | sort %}
-            {% set _ = out.update({ domain: (services[domain].keys() | list | sort) }) %}
-          {% endfor %}
-          {{ out | tojson }}
+    - service: python_script.ha_diag_list_services
 
 ha_diag_find_entities:
   alias: "HA Diag: Find entities"
@@ -54,14 +46,34 @@ ha_diag_find_entities:
       description: Optional comma-separated domains (e.g. sensor,light,automation)
       required: false
       selector:
-        text:
+        select:
+          options:
+            - automation
+            - binary_sensor
+            - camera
+            - climate
+            - cover
+            - device_tracker
+            - fan
+            - input_boolean
+            - input_number
+            - input_select
+            - light
+            - lock
+            - media_player
+            - person
+            - scene
+            - script
+            - sensor
+            - switch
     limit:
       description: Max results (default 20)
       required: false
       selector:
         number:
           min: 1
-          max: 100
+          max: 500
+          step: 1
           mode: slider
   sequence:
     - event: ha_diag_result
