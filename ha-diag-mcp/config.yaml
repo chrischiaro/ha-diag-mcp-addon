@@ -1,7 +1,7 @@
 name: "Home Automation Diagnostics MCP"
 slug: "ha_diag_mcp"
 description: "MCP server providing Home Assistant diagnostics tools over Streamable HTTP"
-version: "0.1.23"
+version: "0.1.24"
 startup: application
 boot: auto
 init: false
@@ -15,7 +15,7 @@ hassio_api: true
 hassio_role: default
 
 map:
-  - addon_config:rw
+  - config:rw
 
 options:
   log_level: info
