@@ -203,6 +203,150 @@ app.get("/yaml/automation/:itemId", async (req, res) => {
   }
 });
 
+/************************/
+/** Filesystem endpoints (add-on) */
+/************************/
+app.post("/fs/read", async (req, res) => {
+  try {
+    const { path: filePath, max_size } = req.body;
+    if (!filePath || typeof filePath !== "string") {
+      res.status(400).json({ error: "Missing or invalid 'path' parameter" });
+      return;
+    }
+
+    // Security: restrict to /config directory
+    const normalized = path.normalize(filePath);
+    if (!normalized.startsWith("/config/") && normalized !== "/config") {
+      res.status(403).json({ error: "Access denied: path must be within /config/" });
+      return;
+    }
+
+    const stat = await fs.stat(normalized);
+    if (!stat.isFile()) {
+      res.status(400).json({ error: "Path is not a file" });
+      return;
+    }
+
+    const maxSize = max_size || 100000; // 100KB default
+    if (stat.size > maxSize) {
+      res.status(413).json({
+        error: `File too large (${stat.size} bytes, max ${maxSize})`,
+        truncated: true,
+      });
+      return;
+    }
+
+    const content = await fs.readFile(normalized, "utf-8");
+    res.json({ path: normalized, size: stat.size, content });
+  } catch (e: any) {
+    res.status(500).json({ error: String(e?.message ?? e) });
+  }
+});
+
+app.post("/fs/find", async (req, res) => {
+  try {
+    const { filename, search_root } = req.body;
+    if (!filename || typeof filename !== "string") {
+      res.status(400).json({ error: "Missing or invalid 'filename' parameter" });
+      return;
+    }
+
+    const root = search_root || "/config";
+    const normalized = path.normalize(root);
+    if (!normalized.startsWith("/config/") && normalized !== "/config") {
+      res.status(403).json({ error: "Access denied: search_root must be within /config/" });
+      return;
+    }
+
+    const results: string[] = [];
+    const maxResults = 50;
+
+    async function search(dir: string, depth: number) {
+      if (depth > 5 || results.length >= maxResults) return;
+
+      const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
+      for (const entry of entries) {
+        if (results.length >= maxResults) break;
+        const fullPath = path.join(dir, entry.name);
+
+        if (entry.isFile() && entry.name.includes(filename)) {
+          results.push(fullPath);
+        }
+
+        if (entry.isDirectory() && !entry.name.startsWith(".")) {
+          await search(fullPath, depth + 1);
+        }
+      }
+    }
+
+    await search(normalized, 0);
+    res.json({ filename, search_root: normalized, count: results.length, results });
+  } catch (e: any) {
+    res.status(500).json({ error: String(e?.message ?? e) });
+  }
+});
+
+app.post("/fs/grep", async (req, res) => {
+  try {
+    const { path: filePath, pattern, context_lines } = req.body;
+    if (!filePath || typeof filePath !== "string") {
+      res.status(400).json({ error: "Missing or invalid 'path' parameter" });
+      return;
+    }
+    if (!pattern || typeof pattern !== "string") {
+      res.status(400).json({ error: "Missing or invalid 'pattern' parameter" });
+      return;
+    }
+
+    // Security: restrict to /config directory
+    const normalized = path.normalize(filePath);
+    if (!normalized.startsWith("/config/") && normalized !== "/config") {
+      res.status(403).json({ error: "Access denied: path must be within /config/" });
+      return;
+    }
+
+    const content = await fs.readFile(normalized, "utf-8");
+    const lines = content.split("\n");
+    const contextSize = context_lines || 5;
+    const matches: any[] = [];
+
+    const regex = new RegExp(pattern, "i");
+    for (let i = 0; i < lines.length; i++) {
+      if (regex.test(lines[i])) {
+        const start = Math.max(0, i - contextSize);
+        const end = Math.min(lines.length - 1, i + contextSize);
+        const contextLines = [];
+
+        for (let j = start; j <= end; j++) {
+          contextLines.push({
+            line_number: j + 1,
+            content: lines[j],
+            is_match: j === i,
+          });
+        }
+
+        matches.push({
+          line_number: i + 1,
+          line: lines[i],
+          context: contextLines,
+        });
+
+        if (matches.length >= 20) break; // Limit results
+      }
+    }
+
+    res.json({
+      path: normalized,
+      pattern,
+      count: matches.length,
+      matches,
+      truncated: matches.length >= 20,
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: String(e?.message ?? e) });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Home Automation Diagnostics MCP listening on :${PORT} (endpoint /mcp)`);
 });

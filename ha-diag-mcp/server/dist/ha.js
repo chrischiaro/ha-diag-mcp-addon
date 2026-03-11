@@ -71,6 +71,26 @@ export async function haGet(path) {
     }
     return res.json();
 }
+export async function haPost(path, body) {
+    const url = supervisorMode()
+        ? `http://supervisor/core/api${path}`
+        : `${HA_BASE_URL}/api${path}`;
+    const headers = supervisorMode() ? supervisorHeaders() : haDirectHeaders();
+    const res = await fetch(url, {
+        method: "POST",
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+    });
+    if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`HA POST ${path} failed: ${res.status} ${res.statusText}${text ? ` - ${text}` : ''}`);
+    }
+    const contentType = res.headers.get("content-type");
+    if (contentType?.includes("application/json")) {
+        return res.json();
+    }
+    return res.text();
+}
 export async function haState(entityId) {
     return haGet(`/states/${encodeURIComponent(entityId)}`);
 }
@@ -195,8 +215,18 @@ async function haWsCommand(payload) {
     });
 }
 export async function haRepairsListIssues() {
-    // This is the “Repairs” list in Settings
     return haWsCommand({ type: "repairs/list_issues" });
+}
+export async function haCallService(domain, service, serviceData, target) {
+    const body = {};
+    if (serviceData)
+        body.service_data = serviceData;
+    if (target)
+        body.target = target;
+    return haPost(`/services/${encodeURIComponent(domain)}/${encodeURIComponent(service)}`, body);
+}
+export async function haRenderTemplate(template) {
+    return haPost("/template", { template });
 }
 /* Helper functions */
 export function toIsoFromMillis(epochMs) {

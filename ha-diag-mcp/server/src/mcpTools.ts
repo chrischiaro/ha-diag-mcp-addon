@@ -15,6 +15,8 @@ import {
   sanitizeAutomationConfig,
   supervisorHostInfo,
   toIsoFromMillis,
+  haCallService,
+  haRenderTemplate,
 } from "./ha.js";
 
 // Heuristic: normalize traces into an array and pick a "most recent"
@@ -394,6 +396,149 @@ export function registerTools(mcp: McpServer) {
         issues,
         raw: include_raw ? raw : undefined,
       };
+    },
+  });
+
+  // New filesystem and service tools
+  defineTool(mcp, {
+    name: "ha_read_file",
+    description: "Read any file from the Home Assistant /config filesystem. Use this to check actual file contents, automations.yaml, package files, etc.",
+    params: {
+      path: z.string().min(1).describe("Full path to the file (must be within /config/)"),
+      max_size: z.number().min(1).max(1000000).optional().describe("Maximum file size in bytes (default: 100000)"),
+    },
+    handler: async ({ path, max_size }) => {
+      const addonUrl = process.env.HA_DIAG_ADDON_URL;
+      if (!addonUrl) {
+        throw new Error("HA_DIAG_ADDON_URL is not set. Point it to your HAOS add-on base URL (e.g. http://<ha-ip>:<port>).");
+      }
+
+      const r = await fetch(`${addonUrl}/fs/read`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path, max_size }),
+      });
+
+      if (!r.ok) {
+        const body = await r.text();
+        throw new Error(`Add-on returned ${r.status}: ${body}`);
+      }
+
+      return r.json();
+    },
+  });
+
+  defineTool(mcp, {
+    name: "ha_find_file",
+    description: "Find files by name within the Home Assistant /config directory. Use this to locate configuration files.",
+    params: {
+      filename: z.string().min(1).describe("Filename or pattern to search for (e.g., 'automations.yaml')"),
+      search_root: z.string().optional().describe("Root directory to search from (default: /config)"),
+    },
+    handler: async ({ filename, search_root }) => {
+      const addonUrl = process.env.HA_DIAG_ADDON_URL;
+      if (!addonUrl) {
+        throw new Error("HA_DIAG_ADDON_URL is not set. Point it to your HAOS add-on base URL (e.g. http://<ha-ip>:<port>).");
+      }
+
+      const r = await fetch(`${addonUrl}/fs/find`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename, search_root }),
+      });
+
+      if (!r.ok) {
+        const body = await r.text();
+        throw new Error(`Add-on returned ${r.status}: ${body}`);
+      }
+
+      return r.json();
+    },
+  });
+
+  defineTool(mcp, {
+    name: "ha_grep_file",
+    description: "Search for a pattern within a file and return matching lines with context. Use this to find specific configurations or patterns in files.",
+    params: {
+      path: z.string().min(1).describe("Full path to the file (must be within /config/)"),
+      pattern: z.string().min(1).describe("Search pattern (regex supported)"),
+      context_lines: z.number().min(0).max(20).optional().describe("Number of context lines before/after match (default: 5)"),
+    },
+    handler: async ({ path, pattern, context_lines }) => {
+      const addonUrl = process.env.HA_DIAG_ADDON_URL;
+      if (!addonUrl) {
+        throw new Error("HA_DIAG_ADDON_URL is not set. Point it to your HAOS add-on base URL (e.g. http://<ha-ip>:<port>).");
+      }
+
+      const r = await fetch(`${addonUrl}/fs/grep`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path, pattern, context_lines }),
+      });
+
+      if (!r.ok) {
+        const body = await r.text();
+        throw new Error(`Add-on returned ${r.status}: ${body}`);
+      }
+
+      return r.json();
+    },
+  });
+
+  defineTool(mcp, {
+    name: "ha_call_service",
+    description: "Call any Home Assistant service directly (e.g., automation.trigger, automation.reload, homeassistant.reload_all). Use this to trigger automations, reload configs, or execute any HA service.",
+    params: {
+      domain: z.string().min(1).describe("Service domain (e.g., 'automation', 'homeassistant', 'light')"),
+      service: z.string().min(1).describe("Service name (e.g., 'trigger', 'reload', 'turn_on')"),
+      service_data: z.record(z.any()).optional().describe("Service data/parameters (optional)"),
+      target: z.object({
+        entity_id: z.union([z.string(), z.array(z.string())]).optional(),
+        device_id: z.union([z.string(), z.array(z.string())]).optional(),
+        area_id: z.union([z.string(), z.array(z.string())]).optional(),
+      }).optional().describe("Target entities, devices, or areas (optional)"),
+    },
+    handler: async ({ domain, service, service_data, target }) => {
+      try {
+        const result = await haCallService(domain, service, service_data, target);
+        return {
+          success: true,
+          domain,
+          service,
+          result,
+        };
+      } catch (e: any) {
+        return {
+          success: false,
+          domain,
+          service,
+          error: String(e?.message ?? e),
+        };
+      }
+    },
+  });
+
+  defineTool(mcp, {
+    name: "ha_evaluate_template",
+    description: "Evaluate a Jinja2 template against the live Home Assistant state. Use this to test conditions, check state values, or debug template logic.",
+    params: {
+      template: z.string().min(1).describe("Jinja2 template to evaluate (e.g., '{{ states(\"sensor.temperature\") }}')"),
+    },
+    handler: async ({ template }) => {
+      try {
+        const result = await haRenderTemplate(template);
+        return {
+          success: true,
+          template,
+          result,
+        };
+      } catch (e: any) {
+        return {
+          success: false,
+          template,
+          error: String(e?.message ?? e),
+        };
+      }
     },
   });
 }
