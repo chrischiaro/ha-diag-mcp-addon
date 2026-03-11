@@ -311,6 +311,41 @@ app.post("/fs/grep", async (req, res) => {
         res.status(500).json({ error: String(e?.message ?? e) });
     }
 });
+app.post("/fs/write", async (req, res) => {
+    try {
+        const { path: filePath, content } = req.body;
+        if (!filePath || typeof filePath !== "string") {
+            res.status(400).json({ error: "Missing or invalid 'path' parameter" });
+            return;
+        }
+        if (typeof content !== "string") {
+            res.status(400).json({ error: "Missing or invalid 'content' parameter" });
+            return;
+        }
+        // Security: restrict to /config directory
+        const normalized = path.normalize(filePath);
+        if (!normalized.startsWith("/config/") && normalized !== "/config") {
+            res.status(403).json({ error: "Access denied: path must be within /config/" });
+            return;
+        }
+        // Additional safety: don't allow writing to /config itself (it's a directory)
+        if (normalized === "/config") {
+            res.status(400).json({ error: "Cannot write to /config directory itself" });
+            return;
+        }
+        // Write the file
+        await fs.writeFile(normalized, content, "utf-8");
+        const stat = await fs.stat(normalized);
+        res.json({
+            path: normalized,
+            size: stat.size,
+            success: true,
+        });
+    }
+    catch (e) {
+        res.status(500).json({ error: String(e?.message ?? e) });
+    }
+});
 app.listen(PORT, () => {
     console.log(`Home Automation Diagnostics MCP listening on :${PORT} (endpoint /mcp)`);
 });

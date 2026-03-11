@@ -396,6 +396,30 @@ export function registerTools(mcp) {
         },
     });
     defineTool(mcp, {
+        name: "ha_write_file",
+        description: "Write content to any file in the Home Assistant /config filesystem. Use this to update configuration files, automations.yaml, etc. WARNING: This overwrites the entire file.",
+        params: {
+            path: z.string().min(1).describe("Full path to the file (must be within /config/)"),
+            content: z.string().describe("Complete file content to write"),
+        },
+        handler: async ({ path, content }) => {
+            const addonUrl = process.env.HA_DIAG_ADDON_URL;
+            if (!addonUrl) {
+                throw new Error("HA_DIAG_ADDON_URL is not set. Point it to your HAOS add-on base URL (e.g. http://<ha-ip>:<port>).");
+            }
+            const r = await fetch(`${addonUrl}/fs/write`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ path, content }),
+            });
+            if (!r.ok) {
+                const body = await r.text();
+                throw new Error(`Add-on returned ${r.status}: ${body}`);
+            }
+            return r.json();
+        },
+    });
+    defineTool(mcp, {
         name: "ha_call_service",
         description: "Call any Home Assistant service directly (e.g., automation.trigger, automation.reload, homeassistant.reload_all). Use this to trigger automations, reload configs, or execute any HA service.",
         params: {
