@@ -26,11 +26,6 @@ app.use((err, _req, _res, _next) => {
 });
 process.on("uncaughtException", (e) => console.error("uncaughtException:", e));
 process.on("unhandledRejection", (e) => console.error("unhandledRejection:", e));
-const mcp = new McpServer({
-    name: "home-automation-diagnostics",
-    version: "0.1.0",
-});
-registerTools(mcp);
 /************************/
 /** YAML helper funcs (add-on only) */
 /************************/
@@ -123,6 +118,12 @@ async function getOrCreateTransport(req, res) {
     if (sessionId && transports[sessionId])
         return transports[sessionId];
     if (!sessionId && isInitializeRequest(req.body)) {
+        // Create a new McpServer instance for each session
+        const mcp = new McpServer({
+            name: "home-automation-diagnostics",
+            version: "0.1.0",
+        });
+        registerTools(mcp);
         let transport;
         transport = new StreamableHTTPServerTransport({
             sessionIdGenerator: () => randomUUID(),
