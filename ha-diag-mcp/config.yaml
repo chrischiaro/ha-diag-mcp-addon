@@ -1,7 +1,7 @@
 name: "Home Automation Diagnostics MCP"
 slug: "ha_diag_mcp"
 description: "MCP server providing Home Assistant diagnostics tools over Streamable HTTP"
-version: "0.1.18"
+version: "0.1.19"
 startup: application
 boot: auto
 init: false
@@ -20,9 +20,12 @@ map:
 options:
   log_level: info
   allow_origin: "*"
+  ha_diag_addon_url: "http://homeassistant:3000"  # default
+
 schema:
   log_level: list(trace|debug|info|warn|error)
   allow_origin: str
+  ha_diag_addon_url: str
 
 ports:
   3000/tcp: 3000
