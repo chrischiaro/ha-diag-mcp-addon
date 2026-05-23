@@ -338,33 +338,6 @@ export function registerTools(mcp: McpServer) {
     },
   });
 
-  defineTool(mcp, {
-    name: "ha_get_automation_yaml_definition",
-    description: "Fetch the YAML definition of an automation by item id (fallback for YAML-managed automations).",
-    params: { automation_entity_id: z.string().min(1).describe("The automation entity_id or item id") },
-    handler: async ({ automation_entity_id }) => {
-      const addonUrl = process.env.HA_DIAG_ADDON_URL;
-      if (!addonUrl) {
-        throw new Error(
-          "HA_DIAG_ADDON_URL is not set. Point it to your HAOS add-on base URL (e.g. http://<ha-ip>:<port>)."
-        );
-      }
-
-      const itemId = automation_entity_id.startsWith("automation.")
-        ? automation_entity_id.slice("automation.".length)
-        : automation_entity_id;
-
-      const r = await fetch(`${addonUrl}/yaml/automation/${encodeURIComponent(itemId)}`);
-
-      if (!r.ok) {
-        const body = await r.text();
-        throw new Error(`Add-on returned ${r.status}: ${body}`);
-      }
-
-      const body = await r.text();
-      return { yaml_definition: JSON.parse(body) };
-    },
-  });
 
   defineTool(mcp, {
     name: "ha_list_repairs",
@@ -402,12 +375,14 @@ export function registerTools(mcp: McpServer) {
   // New filesystem and service tools
   defineTool(mcp, {
     name: "ha_read_file",
-    description: "Read any file from the Home Assistant /config filesystem. Use this to check actual file contents, automations.yaml, package files, etc.",
+    description: "Read any file from the Home Assistant /config filesystem. Use start_line/end_line to page through files larger than max_size.",
     params: {
       path: z.string().min(1).describe("Full path to the file (must be within /config/)"),
-      max_size: z.number().min(1).max(1000000).optional().describe("Maximum file size in bytes (default: 100000)"),
+      max_size: z.number().min(1).max(1000000).optional().describe("Maximum content size in bytes (default: 100000). Increase if needed."),
+      start_line: z.number().min(1).optional().describe("First line to return, 1-indexed (default: start of file)"),
+      end_line: z.number().min(1).optional().describe("Last line to return, 1-indexed inclusive (default: end of file)"),
     },
-    handler: async ({ path, max_size }) => {
+    handler: async ({ path, max_size, start_line, end_line }) => {
       const addonUrl = process.env.HA_DIAG_ADDON_URL;
       if (!addonUrl) {
         throw new Error("HA_DIAG_ADDON_URL is not set. Point it to your HAOS add-on base URL (e.g. http://<ha-ip>:<port>).");
@@ -416,7 +391,7 @@ export function registerTools(mcp: McpServer) {
       const r = await fetch(`${addonUrl}/fs/read`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path, max_size }),
+        body: JSON.stringify({ path, max_size, start_line, end_line }),
       });
 
       if (!r.ok) {
@@ -543,6 +518,36 @@ export function registerTools(mcp: McpServer) {
           error: String(e?.message ?? e),
         };
       }
+    },
+  });
+
+  defineTool(mcp, {
+    name: "ha_replace_in_file",
+    description: "Replace a specific string within a Home Assistant config file. Prefer this over ha_write_file for targeted edits — no need to send the entire file content.",
+    params: {
+      path: z.string().min(1).describe("Full path to the file (must be within /config/)"),
+      old_string: z.string().min(1).describe("Exact string to find and replace"),
+      new_string: z.string().describe("Replacement string"),
+      replace_all: z.boolean().optional().describe("Replace all occurrences instead of just the first (default: false)"),
+    },
+    handler: async ({ path, old_string, new_string, replace_all }) => {
+      const addonUrl = process.env.HA_DIAG_ADDON_URL;
+      if (!addonUrl) {
+        throw new Error("HA_DIAG_ADDON_URL is not set. Point it to your HAOS add-on base URL (e.g. http://<ha-ip>:<port>).");
+      }
+
+      const r = await fetch(`${addonUrl}/fs/replace`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path, old_string, new_string, replace_all }),
+      });
+
+      if (!r.ok) {
+        const body = await r.text();
+        throw new Error(`Add-on returned ${r.status}: ${body}`);
+      }
+
+      return r.json();
     },
   });
 

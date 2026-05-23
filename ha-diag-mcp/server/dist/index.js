@@ -19,7 +19,7 @@ function log(...args) {
         console.log(...args);
 }
 const app = express();
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "5mb" }));
 app.use(cors({ origin: ALLOW_ORIGIN }));
 app.use((err, _req, _res, _next) => {
     console.error("express error:", err);
@@ -187,7 +187,7 @@ app.get("/yaml/automation/:itemId", async (req, res) => {
 /************************/
 app.post("/fs/read", async (req, res) => {
     try {
-        const { path: filePath, max_size } = req.body;
+        const { path: filePath, max_size, start_line, end_line } = req.body;
         if (!filePath || typeof filePath !== "string") {
             res.status(400).json({ error: "Missing or invalid 'path' parameter" });
             return;
@@ -203,16 +203,30 @@ app.post("/fs/read", async (req, res) => {
             res.status(400).json({ error: "Path is not a file" });
             return;
         }
-        const maxSize = max_size || 100000; // 100KB default
-        if (stat.size > maxSize) {
+        const fullContent = await fs.readFile(normalized, "utf-8");
+        const allLines = fullContent.split("\n");
+        const totalLines = allLines.length;
+        const startIdx = start_line ? Math.max(0, start_line - 1) : 0;
+        const endIdx = end_line ? Math.min(totalLines - 1, end_line - 1) : totalLines - 1;
+        const slicedLines = allLines.slice(startIdx, endIdx + 1);
+        const content = slicedLines.join("\n");
+        const maxSize = max_size || 100000;
+        if (content.length > maxSize) {
             res.status(413).json({
-                error: `File too large (${stat.size} bytes, max ${maxSize})`,
+                error: `Content too large (${content.length} bytes, max ${maxSize}). Use start_line/end_line to read in sections.`,
+                total_lines: totalLines,
                 truncated: true,
             });
             return;
         }
-        const content = await fs.readFile(normalized, "utf-8");
-        res.json({ path: normalized, size: stat.size, content });
+        res.json({
+            path: normalized,
+            size: stat.size,
+            total_lines: totalLines,
+            start_line: startIdx + 1,
+            end_line: endIdx + 1,
+            content,
+        });
     }
     catch (e) {
         res.status(500).json({ error: String(e?.message ?? e) });
@@ -338,6 +352,49 @@ app.post("/fs/write", async (req, res) => {
         const stat = await fs.stat(normalized);
         res.json({
             path: normalized,
+            size: stat.size,
+            success: true,
+        });
+    }
+    catch (e) {
+        res.status(500).json({ error: String(e?.message ?? e) });
+    }
+});
+app.post("/fs/replace", async (req, res) => {
+    try {
+        const { path: filePath, old_string, new_string, replace_all } = req.body;
+        if (!filePath || typeof filePath !== "string") {
+            res.status(400).json({ error: "Missing or invalid 'path' parameter" });
+            return;
+        }
+        if (!old_string || typeof old_string !== "string") {
+            res.status(400).json({ error: "Missing or invalid 'old_string' parameter" });
+            return;
+        }
+        if (typeof new_string !== "string") {
+            res.status(400).json({ error: "Missing or invalid 'new_string' parameter" });
+            return;
+        }
+        const normalized = path.normalize(filePath);
+        if (!normalized.startsWith("/config/") && normalized !== "/config") {
+            res.status(403).json({ error: "Access denied: path must be within /config/" });
+            return;
+        }
+        const content = await fs.readFile(normalized, "utf-8");
+        const occurrences = content.split(old_string).length - 1;
+        if (occurrences === 0) {
+            res.status(404).json({ error: "old_string not found in file", path: normalized });
+            return;
+        }
+        const newContent = replace_all
+            ? content.split(old_string).join(new_string)
+            : content.replace(old_string, new_string);
+        await fs.writeFile(normalized, newContent, "utf-8");
+        const stat = await fs.stat(normalized);
+        res.json({
+            path: normalized,
+            occurrences_found: occurrences,
+            occurrences_replaced: replace_all ? occurrences : 1,
             size: stat.size,
             success: true,
         });
