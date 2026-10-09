@@ -1,6 +1,7 @@
 import { z } from "zod";
 import yaml from "js-yaml";
 import { defineTool } from "./toolkit.js";
+import { addonHeaders } from "./auth.js";
 import { haAutomationConfig, haAutomationTraces, haLogbook, haHistoryPeriod, haRepairsListIssues, haServices, haState, haStates, sanitizeAutomationConfig, supervisorHostInfo, toIsoFromMillis, haCallService, haRenderTemplate, haErrorLog, } from "./ha.js";
 // trace/list items carry timestamp as { start, finish }; older heuristics used a plain string.
 function traceStartMs(t) {
@@ -513,7 +514,7 @@ export function registerTools(mcp) {
             }
             const r = await fetch(`${addonUrl}/fs/read`, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: addonHeaders(),
                 body: JSON.stringify({ path, max_size, start_line, end_line }),
             });
             if (!r.ok) {
@@ -537,7 +538,7 @@ export function registerTools(mcp) {
             }
             const r = await fetch(`${addonUrl}/fs/find`, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: addonHeaders(),
                 body: JSON.stringify({ filename, search_root }),
             });
             if (!r.ok) {
@@ -562,7 +563,7 @@ export function registerTools(mcp) {
             }
             const r = await fetch(`${addonUrl}/fs/grep`, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: addonHeaders(),
                 body: JSON.stringify({ path, pattern, context_lines }),
             });
             if (!r.ok) {
@@ -586,7 +587,7 @@ export function registerTools(mcp) {
             }
             const r = await fetch(`${addonUrl}/fs/write`, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: addonHeaders(),
                 body: JSON.stringify({ path, content }),
             });
             if (!r.ok) {
@@ -645,7 +646,7 @@ export function registerTools(mcp) {
             }
             const r = await fetch(`${addonUrl}/fs/replace`, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: addonHeaders(),
                 body: JSON.stringify({ path, old_string, new_string, replace_all }),
             });
             if (!r.ok) {

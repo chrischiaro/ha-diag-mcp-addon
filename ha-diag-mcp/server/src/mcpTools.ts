@@ -3,6 +3,7 @@ import yaml from "js-yaml";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 import { defineTool } from "./toolkit.js";
+import { addonHeaders } from "./auth.js";
 import {
   haAutomationConfig,
   haAutomationTraces,
@@ -609,7 +610,7 @@ export function registerTools(mcp: McpServer) {
 
       const r = await fetch(`${addonUrl}/fs/read`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: addonHeaders(),
         body: JSON.stringify({ path, max_size, start_line, end_line }),
       });
 
@@ -637,7 +638,7 @@ export function registerTools(mcp: McpServer) {
 
       const r = await fetch(`${addonUrl}/fs/find`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: addonHeaders(),
         body: JSON.stringify({ filename, search_root }),
       });
 
@@ -666,7 +667,7 @@ export function registerTools(mcp: McpServer) {
 
       const r = await fetch(`${addonUrl}/fs/grep`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: addonHeaders(),
         body: JSON.stringify({ path, pattern, context_lines }),
       });
 
@@ -694,7 +695,7 @@ export function registerTools(mcp: McpServer) {
 
       const r = await fetch(`${addonUrl}/fs/write`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: addonHeaders(),
         body: JSON.stringify({ path, content }),
       });
 
@@ -757,7 +758,7 @@ export function registerTools(mcp: McpServer) {
 
       const r = await fetch(`${addonUrl}/fs/replace`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: addonHeaders(),
         body: JSON.stringify({ path, old_string, new_string, replace_all }),
       });
 
