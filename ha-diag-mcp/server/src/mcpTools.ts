@@ -28,18 +28,35 @@ function traceStartMs(t: any): number {
 
 // Resolve a query window from explicit ISO start/end (include a timezone offset, e.g. 2026-10-09T09:40:00+02:00)
 // or from "last N hours". Returned timestamps are UTC ISO strings.
+const MAX_WINDOW_HOURS = 168;
+// Full date-time with an explicit timezone: Z or +HH:MM / -HHMM. Date.parse would otherwise read a
+// bare date-time as server-local time and a bare date as UTC, silently shifting the window.
+const ISO_WITH_OFFSET = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})$/i;
+
+function parseIsoWithOffset(value: string, field: string): number {
+  if (!ISO_WITH_OFFSET.test(value.trim())) {
+    throw new Error(
+      `Invalid '${field}' timestamp '${value}': use ISO 8601 with a timezone, e.g. 2026-10-09T09:40:00+02:00 or 2026-10-09T07:40:00Z`
+    );
+  }
+  const ms = Date.parse(value.trim());
+  if (Number.isNaN(ms)) throw new Error(`Invalid '${field}' timestamp: ${value}`);
+  return ms;
+}
+
 function resolveWindow(args: { start?: string; end?: string; since_hours?: number }, defaultHours: number) {
-  const endMs = args.end ? Date.parse(args.end) : Date.now();
-  if (Number.isNaN(endMs)) throw new Error(`Invalid 'end' timestamp: ${args.end}`);
+  const endMs = args.end ? parseIsoWithOffset(args.end, "end") : Date.now();
 
   let startMs: number;
   if (args.start) {
-    startMs = Date.parse(args.start);
-    if (Number.isNaN(startMs)) throw new Error(`Invalid 'start' timestamp: ${args.start}`);
+    startMs = parseIsoWithOffset(args.start, "start");
   } else {
     startMs = endMs - (args.since_hours ?? defaultHours) * 60 * 60 * 1000;
   }
   if (startMs >= endMs) throw new Error("'start' must be before 'end'");
+  if (endMs - startMs > MAX_WINDOW_HOURS * 60 * 60 * 1000) {
+    throw new Error(`Window too large: max ${MAX_WINDOW_HOURS} hours (7 days) between start and end`);
+  }
 
   return { startIso: toIsoFromMillis(startMs), endIso: toIsoFromMillis(endMs) };
 }
@@ -268,12 +285,13 @@ export function registerTools(mcp: McpServer) {
               timestamp: trace?.timestamp ?? trace?.time ?? trace?.created ?? null,
               script_execution: trace?.script_execution ?? null,
               last_step: trace?.last_step ?? null,
-              trigger: trace?.trigger ?? null,
               result: trace?.result ?? null,
               error: trace?.error ?? trace?.result?.error ?? null,
               failed_step: trace?.failed_step ?? trace?.result?.failed_step ?? null,
             }
             : null,
+
+          trace_note: traces?.note ?? undefined,
 
           recent_runs: Array.isArray(traces?.traces)
             ? [...traces.traces]
@@ -303,11 +321,11 @@ export function registerTools(mcp: McpServer) {
       "Get recorded state history for one or more entities over a time window, as compact [timestamp, state] points (timestamps are UTC). Use this to find exactly when a sensor crossed a threshold.",
     params: {
       entity_ids: z.array(z.string().min(1)).min(1).max(10).describe("Entity ids to fetch (max 10)"),
-      start: z.string().optional().describe("Window start, ISO 8601 with timezone offset (e.g. 2026-10-09T09:40:00+02:00). Overrides since_hours."),
-      end: z.string().optional().describe("Window end, ISO 8601 with timezone offset (default: now)"),
+      start: z.string().optional().describe("Window start, ISO 8601 WITH timezone (Z or offset), e.g. 2026-10-09T09:40:00+02:00. Overrides since_hours. Max window: 7 days."),
+      end: z.string().optional().describe("Window end, ISO 8601 WITH timezone (Z or offset) (default: now)"),
       since_hours: z.number().min(0.01).max(168).optional().describe("Look back this many hours from end when start is not given (default: 3, max: 168)"),
       significant_changes_only: z.boolean().optional().describe("Set false to include every recorded state change (HA default drops some attribute-only/insignificant changes)"),
-      max_points: z.number().min(1).max(5000).optional().describe("Max points per entity (default: 2000). If exceeded, the earliest points are returned and truncated=true; narrow the window to see the rest."),
+      max_points: z.number().min(1).max(5000).optional().describe("Max points per entity (default: 2000). If exceeded, the NEWEST points are returned and truncated=true; narrow the window to see earlier ones."),
     },
     handler: async ({ entity_ids, start, end, since_hours, significant_changes_only, max_points }) => {
       const { startIso, endIso } = resolveWindow({ start, end, since_hours }, 3);
@@ -324,8 +342,9 @@ export function registerTools(mcp: McpServer) {
 
       const series = (Array.isArray(raw) ? raw : []).map((states: any[]) => {
         const all = Array.isArray(states) ? states : [];
+        // Keep the NEWEST points when over the cap: the usual question is "what happened just before now".
         const points = all
-          .slice(0, cap)
+          .slice(-cap)
           .map((s: any) => [s?.last_changed ?? s?.last_updated ?? null, s?.state ?? null]);
         return {
           entity_id: all[0]?.entity_id ?? null,
@@ -342,6 +361,7 @@ export function registerTools(mcp: McpServer) {
       return {
         window: { start: startIso, end: endIso },
         timezone_note: "All timestamps are UTC as returned by Home Assistant.",
+        first_point_note: "The first point of a series is the state as of the window start (or the earliest record), not necessarily a real change time. If truncated=true, only the newest points are returned; narrow the window to see earlier ones.",
         series,
         missing_entities: entity_ids.filter((id) => !series.some((s) => s.entity_id === id)),
       };
@@ -353,8 +373,8 @@ export function registerTools(mcp: McpServer) {
     description:
       "Get Home Assistant logbook entries for a time window (timestamps are UTC), optionally for one entity and/or filtered by text. Use search='started' or 'stopped' to find Home Assistant restarts, or an automation name to see when it ran.",
     params: {
-      start: z.string().optional().describe("Window start, ISO 8601 with timezone offset. Overrides since_hours."),
-      end: z.string().optional().describe("Window end, ISO 8601 with timezone offset (default: now)"),
+      start: z.string().optional().describe("Window start, ISO 8601 WITH timezone (Z or offset), e.g. 2026-10-09T09:40:00+02:00. Overrides since_hours. Max window: 7 days."),
+      end: z.string().optional().describe("Window end, ISO 8601 WITH timezone (Z or offset) (default: now)"),
       since_hours: z.number().min(0.01).max(168).optional().describe("Look back this many hours from end when start is not given (default: 6, max: 168)"),
       entity_id: z.string().min(1).optional().describe("Only entries for this entity"),
       search: z.string().min(1).optional().describe("Case-insensitive text filter applied to name, message, state, entity_id and domain"),
@@ -396,26 +416,30 @@ export function registerTools(mcp: McpServer) {
   defineTool(mcp, {
     name: "ha_get_error_log",
     description:
-      "Read the Home Assistant Core log for the CURRENT run only (it starts at the last Home Assistant start; it will not contain the shutdown that preceded it). Supports a regex filter and tail.",
+      "Read the Home Assistant Core log for the CURRENT run only (it starts at the last Home Assistant start; it will not contain the shutdown that preceded it). Supports a plain-text filter and tail. Needs Core to keep a log file (on Supervisor installs, enable the Core option duplicate_log_file); otherwise Home Assistant returns 404.",
     params: {
-      search: z.string().min(1).optional().describe("Case-insensitive regex; only matching lines are returned"),
+      search: z.string().min(1).max(200).optional().describe("Case-insensitive plain-text filter (not a regex); only lines containing it are returned"),
       tail_lines: z.number().min(1).max(2000).optional().describe("Return only the last N (matching) lines (default: 200, max: 2000)"),
     },
     handler: async ({ search, tail_lines }) => {
-      const text = await haErrorLog();
+      let text: string;
+      try {
+        text = await haErrorLog();
+      } catch (e: any) {
+        const msg = String(e?.message ?? e);
+        if (msg.includes(" 404")) {
+          throw new Error(
+            "Home Assistant has no /api/error_log route: Core is not writing a log file. On Supervisor installs this is the default; enable the Core option `duplicate_log_file` (then restart Core), or read logs with `ha core logs` on the host. Original error: " + msg
+          );
+        }
+        throw e;
+      }
       // eslint-disable-next-line no-control-regex
       const lines = text.replace(/\x1b\[[0-9;]*m/g, "").split("\n");
 
-      let re: RegExp | null = null;
-      if (search) {
-        try {
-          re = new RegExp(search, "i");
-        } catch (e: any) {
-          throw new Error(`Invalid regex '${search}': ${String(e?.message ?? e)}`);
-        }
-      }
-
-      const matched = re ? lines.filter((l) => re!.test(l)) : lines;
+      // Plain substring match: a caller-supplied regex can hang the single-threaded server (ReDoS).
+      const needle = search?.toLowerCase();
+      const matched = needle ? lines.filter((l) => l.toLowerCase().includes(needle)) : lines;
       const n = tail_lines ?? 200;
       const out = matched.slice(-n);
 

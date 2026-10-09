@@ -157,9 +157,13 @@ export function automationItemId(entityId: string) {
 // Traces are keyed by the automation's config id (state attribute "id"), not by the entity_id.
 export async function haAutomationTraces(entityId: string, opts?: { includeLatestFull?: boolean }) {
   let itemId = automationItemId(entityId);
+  let hasId = false;
   try {
     const s: any = await haState(entityId);
-    if (s?.attributes?.id) itemId = String(s.attributes.id);
+    if (s?.attributes?.id) {
+      itemId = String(s.attributes.id);
+      hasId = true;
+    }
   } catch {
     // fall back to the entity object id
   }
@@ -175,7 +179,14 @@ export async function haAutomationTraces(entityId: string, opts?: { includeLates
     latest = await haWsCommand({ type: "trace/get", domain: "automation", item_id: itemId, run_id: newest.run_id });
   }
 
-  return { item_id: itemId, traces: list, latest_full: latest };
+  let note: string | undefined;
+  if (!list.length) {
+    note = hasId
+      ? "No stored traces for this automation id (it may not have run recently, or traces were cleared)."
+      : "The automation has no 'id' attribute (typical for YAML automations without an id), so traces could not be matched reliably; the entity object id was tried instead.";
+  }
+
+  return { item_id: itemId, traces: list, latest_full: latest, note };
 }
 
 export async function haHistoryPeriod(params: {
