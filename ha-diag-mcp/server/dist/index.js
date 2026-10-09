@@ -8,7 +8,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { registerTools } from "./mcpTools.js";
-import { parseAllowedOrigins, requireBearerToken } from "./auth.js";
+import { checkToken, parseAllowedOrigins, requireBearerToken } from "./auth.js";
 const PORT = Number(process.env.PORT || 3000);
 const LOG_LEVEL = process.env.LOG_LEVEL || "info";
 const AUTH_TOKEN = process.env.AUTH_TOKEN;
@@ -419,8 +419,14 @@ app.post("/fs/replace", async (req, res) => {
 });
 app.listen(PORT, () => {
     console.log(`Home Automation Diagnostics MCP listening on :${PORT} (endpoint /mcp)`);
-    if (AUTH_TOKEN?.trim()) {
+    const tokenCheck = checkToken(AUTH_TOKEN);
+    if (tokenCheck.error) {
+        console.error(`auth: ${tokenCheck.error} Every route except / and /health returns 503 until it is fixed.`);
+    }
+    else if (tokenCheck.token) {
         console.log("auth: bearer token required on every route except / and /health");
+        if (tokenCheck.warning)
+            console.warn(`auth: ${tokenCheck.warning}`);
     }
     else {
         console.warn("auth: NO TOKEN CONFIGURED - every route except / and /health returns 503. Set the add-on option `auth_token`.");

@@ -23,6 +23,7 @@ map:
 
 # auth_token: required bearer token for every route except / and /health. Leave unset and the server
 #   starts but answers 503 on all protected routes. Generate a long random value (e.g. `openssl rand -hex 32`).
+# ha_diag_addon_url: no longer used (the tools call /fs/* over loopback); kept so existing installs still validate.
 # allow_origin: comma-separated list of exact browser origins allowed cross-origin access. Empty = none.
 #   A wildcard (*) is ignored.
 options:

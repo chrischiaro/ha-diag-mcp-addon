@@ -1,7 +1,7 @@
 import { z } from "zod";
 import yaml from "js-yaml";
 import { defineTool } from "./toolkit.js";
-import { addonHeaders } from "./auth.js";
+import { addonHeaders, selfUrl } from "./auth.js";
 import { haAutomationConfig, haAutomationTraces, haLogbook, haHistoryPeriod, haRepairsListIssues, haServices, haState, haStates, sanitizeAutomationConfig, supervisorHostInfo, toIsoFromMillis, haCallService, haRenderTemplate, haErrorLog, } from "./ha.js";
 // trace/list items carry timestamp as { start, finish }; older heuristics used a plain string.
 function traceStartMs(t) {
@@ -508,11 +508,7 @@ export function registerTools(mcp) {
             end_line: z.number().min(1).optional().describe("Last line to return, 1-indexed inclusive (default: end of file)"),
         },
         handler: async ({ path, max_size, start_line, end_line }) => {
-            const addonUrl = process.env.HA_DIAG_ADDON_URL;
-            if (!addonUrl) {
-                throw new Error("HA_DIAG_ADDON_URL is not set. Point it to your HAOS add-on base URL (e.g. http://<ha-ip>:<port>).");
-            }
-            const r = await fetch(`${addonUrl}/fs/read`, {
+            const r = await fetch(`${selfUrl()}/fs/read`, {
                 method: "POST",
                 headers: addonHeaders(),
                 body: JSON.stringify({ path, max_size, start_line, end_line }),
@@ -532,11 +528,7 @@ export function registerTools(mcp) {
             search_root: z.string().optional().describe("Root directory to search from (default: /config)"),
         },
         handler: async ({ filename, search_root }) => {
-            const addonUrl = process.env.HA_DIAG_ADDON_URL;
-            if (!addonUrl) {
-                throw new Error("HA_DIAG_ADDON_URL is not set. Point it to your HAOS add-on base URL (e.g. http://<ha-ip>:<port>).");
-            }
-            const r = await fetch(`${addonUrl}/fs/find`, {
+            const r = await fetch(`${selfUrl()}/fs/find`, {
                 method: "POST",
                 headers: addonHeaders(),
                 body: JSON.stringify({ filename, search_root }),
@@ -557,11 +549,7 @@ export function registerTools(mcp) {
             context_lines: z.number().min(0).max(20).optional().describe("Number of context lines before/after match (default: 5)"),
         },
         handler: async ({ path, pattern, context_lines }) => {
-            const addonUrl = process.env.HA_DIAG_ADDON_URL;
-            if (!addonUrl) {
-                throw new Error("HA_DIAG_ADDON_URL is not set. Point it to your HAOS add-on base URL (e.g. http://<ha-ip>:<port>).");
-            }
-            const r = await fetch(`${addonUrl}/fs/grep`, {
+            const r = await fetch(`${selfUrl()}/fs/grep`, {
                 method: "POST",
                 headers: addonHeaders(),
                 body: JSON.stringify({ path, pattern, context_lines }),
@@ -581,11 +569,7 @@ export function registerTools(mcp) {
             content: z.string().describe("Complete file content to write"),
         },
         handler: async ({ path, content }) => {
-            const addonUrl = process.env.HA_DIAG_ADDON_URL;
-            if (!addonUrl) {
-                throw new Error("HA_DIAG_ADDON_URL is not set. Point it to your HAOS add-on base URL (e.g. http://<ha-ip>:<port>).");
-            }
-            const r = await fetch(`${addonUrl}/fs/write`, {
+            const r = await fetch(`${selfUrl()}/fs/write`, {
                 method: "POST",
                 headers: addonHeaders(),
                 body: JSON.stringify({ path, content }),
@@ -640,11 +624,7 @@ export function registerTools(mcp) {
             replace_all: z.boolean().optional().describe("Replace all occurrences instead of just the first (default: false)"),
         },
         handler: async ({ path, old_string, new_string, replace_all }) => {
-            const addonUrl = process.env.HA_DIAG_ADDON_URL;
-            if (!addonUrl) {
-                throw new Error("HA_DIAG_ADDON_URL is not set. Point it to your HAOS add-on base URL (e.g. http://<ha-ip>:<port>).");
-            }
-            const r = await fetch(`${addonUrl}/fs/replace`, {
+            const r = await fetch(`${selfUrl()}/fs/replace`, {
                 method: "POST",
                 headers: addonHeaders(),
                 body: JSON.stringify({ path, old_string, new_string, replace_all }),

@@ -17,7 +17,9 @@ Endpoint (after installing add-on):
 Every route except `/` and `/health` (including `/mcp`, `/fs/*` and `/yaml/*`) requires
 `Authorization: Bearer <token>`.
 
-1. Generate a long random token, e.g. `openssl rand -hex 32`.
+1. Generate a long random token, e.g. `openssl rand -hex 32`. Use at least 32 characters with no whitespace:
+   a shorter token works but logs a warning, and one containing whitespace is rejected (every protected
+   route answers `503` and the add-on log says why).
 2. Set it as the add-on option **`auth_token`** and restart the add-on.
 3. Give the same value to each client:
    - `stdio-http-proxy`: set the `HA_DIAG_AUTH_TOKEN` environment variable (never put the token on the
@@ -34,5 +36,8 @@ the token). Tokens are compared in constant time.
 (e.g. `https://dashboard.example.com`). Empty (the default) grants no cross-origin access. A wildcard
 (`*`) is ignored, and the add-on log says so at startup. Non-browser clients (the stdio proxy, curl) are
 not affected by CORS.
+
+The tools that read and write files call this server's own `/fs/*` endpoints over loopback
+(`127.0.0.1`), so the token never leaves the add-on. The `ha_diag_addon_url` option is no longer used for that.
 
 The server speaks plain HTTP. Treat the token like a password and keep the port on a trusted network.
