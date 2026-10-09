@@ -1,7 +1,7 @@
 name: "Home Automation Diagnostics MCP"
 slug: "ha_diag_mcp"
 description: "MCP server providing Home Assistant diagnostics tools over Streamable HTTP"
-version: "0.1.26"
+version: "0.1.27"
 startup: application
 boot: auto
 init: false
@@ -14,8 +14,12 @@ homeassistant_api: true
 hassio_api: true
 hassio_role: default
 
+# `config` is deprecated in favour of `homeassistant_config`, which mounts at /homeassistant
+# unless `path` is set. The server code reads and writes /config, so keep that path.
 map:
-  - config:rw
+  - type: homeassistant_config
+    read_only: false
+    path: /config
 
 options:
   log_level: info
