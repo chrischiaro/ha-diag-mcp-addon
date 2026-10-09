@@ -71,6 +71,23 @@ export async function haGet(path) {
     }
     return res.json();
 }
+// For endpoints that return plain text (e.g. /error_log); haGet always parses JSON.
+export async function haGetText(path) {
+    const url = supervisorMode()
+        ? `http://supervisor/core/api${path}`
+        : `${HA_BASE_URL}/api${path}`;
+    const headers = supervisorMode() ? supervisorHeaders() : haDirectHeaders();
+    const res = await fetch(url, { headers });
+    if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`HA GET ${path} failed: ${res.status} ${res.statusText}${text ? ` - ${text}` : ''}`);
+    }
+    return res.text();
+}
+// Current-run Core log only (HA does not keep the previous boot's log here).
+export async function haErrorLog() {
+    return haGetText("/error_log");
+}
 export async function haPost(path, body) {
     const url = supervisorMode()
         ? `http://supervisor/core/api${path}`
@@ -113,17 +130,41 @@ export async function supervisorHostInfo() {
 export function automationItemId(entityId) {
     return entityId.startsWith("automation.") ? entityId.slice("automation.".length) : entityId;
 }
-export async function haAutomationTraces(entityId) {
-    const itemId = automationItemId(entityId);
-    return haGet(`/trace/automation/${encodeURIComponent(itemId)}`);
+// Traces are only exposed over the HA websocket API (trace/list, trace/get); there is no REST route.
+// Traces are keyed by the automation's config id (state attribute "id"), not by the entity_id.
+export async function haAutomationTraces(entityId, opts) {
+    let itemId = automationItemId(entityId);
+    try {
+        const s = await haState(entityId);
+        if (s?.attributes?.id)
+            itemId = String(s.attributes.id);
+    }
+    catch {
+        // fall back to the entity object id
+    }
+    const traces = await haWsCommand({ type: "trace/list", domain: "automation", item_id: itemId });
+    const list = Array.isArray(traces) ? traces : [];
+    let latest = null;
+    if (opts?.includeLatestFull && list.length) {
+        const newest = [...list].sort((a, b) => (Date.parse(b?.timestamp?.start ?? "") || 0) - (Date.parse(a?.timestamp?.start ?? "") || 0))[0];
+        latest = await haWsCommand({ type: "trace/get", domain: "automation", item_id: itemId, run_id: newest.run_id });
+    }
+    return { item_id: itemId, traces: list, latest_full: latest };
 }
 export async function haHistoryPeriod(params) {
-    const { startIso, endIso, entityIds } = params;
+    const { startIso, endIso, entityIds, minimalResponse, noAttributes, significantChangesOnly } = params;
     const qs = new URLSearchParams();
     if (endIso)
         qs.set("end_time", endIso);
     if (entityIds?.length)
         qs.set("filter_entity_id", entityIds.join(","));
+    // HA treats these as flags (presence = on); significant_changes_only defaults to on, "0" turns it off
+    if (minimalResponse)
+        qs.set("minimal_response", "");
+    if (noAttributes)
+        qs.set("no_attributes", "");
+    if (significantChangesOnly === false)
+        qs.set("significant_changes_only", "0");
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
     return haGet(`/history/period/${encodeURIComponent(startIso)}${suffix}`);
 }
@@ -167,28 +208,30 @@ function wsAuthToken() {
         return SUPERVISOR_TOKEN;
     throw new Error("Need HA_TOKEN or SUPERVISOR_TOKEN to auth WebSocket.");
 }
-// Minimal WS command helper (connect → auth → send → await result)
-async function haWsCommand(payload) {
+// Minimal WS command helper: connect → auth_required → auth → auth_ok → send command → await result.
+// Closes the socket once settled and gives up after timeoutMs.
+async function haWsCommand(payload, timeoutMs = 15000) {
     const url = wsUrl();
     const token = wsAuthToken();
     return await new Promise((resolve, reject) => {
         const ws = new WebSocket(url);
-        let msgId = 1;
-        const id = ++msgId;
-        const cleanup = (err) => {
+        const id = 1;
+        let settled = false;
+        const finish = (err, result) => {
+            if (settled)
+                return;
+            settled = true;
+            clearTimeout(timer);
             try {
                 ws.close();
             }
             catch { }
             if (err)
                 reject(err);
+            else
+                resolve(result);
         };
-        ws.on("open", () => {
-            // 1) auth
-            ws.send(JSON.stringify({ type: "auth", access_token: token }));
-            // 2) command
-            ws.send(JSON.stringify({ id, ...payload }));
-        });
+        const timer = setTimeout(() => finish(new Error(`WebSocket command timed out after ${timeoutMs}ms`)), timeoutMs);
         ws.on("message", (buf) => {
             let msg;
             try {
@@ -197,32 +240,35 @@ async function haWsCommand(payload) {
             catch {
                 return;
             }
-            // auth ok/fail
-            if (msg?.type === "auth_invalid")
-                return cleanup(new Error("WS auth_invalid"));
-            if (msg?.type === "auth_ok")
+            if (msg?.type === "auth_required") {
+                ws.send(JSON.stringify({ type: "auth", access_token: token }));
                 return;
+            }
+            if (msg?.type === "auth_invalid")
+                return finish(new Error("WS auth_invalid"));
+            if (msg?.type === "auth_ok") {
+                ws.send(JSON.stringify({ id, ...payload }));
+                return;
+            }
             // command result
-            if (msg?.id === id) {
+            if (msg?.type === "result" && msg?.id === id) {
                 if (msg?.success)
-                    resolve(msg.result);
+                    finish(undefined, msg.result);
                 else
-                    cleanup(new Error(msg?.error?.message ?? "WS command failed"));
+                    finish(new Error(msg?.error?.message ?? "WS command failed"));
             }
         });
-        ws.on("error", cleanup);
-        ws.on("close", () => cleanup(new Error("WebSocket closed before result")));
+        ws.on("error", (e) => finish(e));
+        ws.on("close", () => finish(new Error("WebSocket closed before result")));
     });
 }
 export async function haRepairsListIssues() {
     return haWsCommand({ type: "repairs/list_issues" });
 }
 export async function haCallService(domain, service, serviceData, target) {
-    const body = {};
-    if (serviceData)
-        body.service_data = serviceData;
-    if (target)
-        body.target = target;
+    // The REST API takes service data as the flat request body; entity_id / device_id / area_id
+    // sit alongside it. Wrapping them in { service_data, target } makes HA reject the call (400).
+    const body = { ...(serviceData ?? {}), ...(target ?? {}) };
     return haPost(`/services/${encodeURIComponent(domain)}/${encodeURIComponent(service)}`, body);
 }
 export async function haRenderTemplate(template) {

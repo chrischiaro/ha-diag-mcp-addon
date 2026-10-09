@@ -17,7 +17,32 @@ import {
   toIsoFromMillis,
   haCallService,
   haRenderTemplate,
+  haErrorLog,
 } from "./ha.js";
+
+// trace/list items carry timestamp as { start, finish }; older heuristics used a plain string.
+function traceStartMs(t: any): number {
+  const raw = t?.timestamp?.start ?? t?.timestamp ?? t?.time ?? t?.created ?? t?.last_updated ?? "";
+  return Date.parse(raw) || 0;
+}
+
+// Resolve a query window from explicit ISO start/end (include a timezone offset, e.g. 2026-10-09T09:40:00+02:00)
+// or from "last N hours". Returned timestamps are UTC ISO strings.
+function resolveWindow(args: { start?: string; end?: string; since_hours?: number }, defaultHours: number) {
+  const endMs = args.end ? Date.parse(args.end) : Date.now();
+  if (Number.isNaN(endMs)) throw new Error(`Invalid 'end' timestamp: ${args.end}`);
+
+  let startMs: number;
+  if (args.start) {
+    startMs = Date.parse(args.start);
+    if (Number.isNaN(startMs)) throw new Error(`Invalid 'start' timestamp: ${args.start}`);
+  } else {
+    startMs = endMs - (args.since_hours ?? defaultHours) * 60 * 60 * 1000;
+  }
+  if (startMs >= endMs) throw new Error("'start' must be before 'end'");
+
+  return { startIso: toIsoFromMillis(startMs), endIso: toIsoFromMillis(endMs) };
+}
 
 // Heuristic: normalize traces into an array and pick a "most recent"
 function pickMostRecentTrace(traces: any): any | null {
@@ -31,15 +56,32 @@ function pickMostRecentTrace(traces: any): any | null {
 
   if (!arr?.length) return null;
 
-  const ts = (t: any) =>
-    Date.parse(t?.timestamp ?? t?.time ?? t?.created ?? t?.last_updated ?? "") || 0;
-
-  return [...arr].sort((a, b) => ts(b) - ts(a))[0];
+  return [...arr].sort((a, b) => traceStartMs(b) - traceStartMs(a))[0];
 }
 
 // Heuristic: dig error-ish info out of a trace payload
 function summarizeTraceFailure(trace: any) {
   if (!trace) return { status: "no_trace" as const };
+
+  // script_execution (from HA's trace/list): finished | failed_conditions | failed_single |
+  // failed_max_runs | aborted | cancelled | error
+  const exec = trace?.script_execution ?? null;
+  if (exec === "failed_conditions") {
+    return {
+      status: "did_not_run" as const,
+      failure_stage: "condition",
+      details: `Trigger fired but a condition failed (last step: ${trace?.last_step ?? "unknown"})`,
+      last_step: trace?.last_step ?? null,
+    };
+  }
+  if (exec === "failed_single" || exec === "failed_max_runs") {
+    return {
+      status: "did_not_run" as const,
+      failure_stage: "mode",
+      details: "Trigger fired but the run was blocked because the automation was already running (mode/max)",
+      last_step: trace?.last_step ?? null,
+    };
+  }
 
   const err =
     trace?.error ??
@@ -163,7 +205,7 @@ export function registerTools(mcp: McpServer) {
       let traces: any = null;
       let trace: any = null;
       try {
-        traces = await haAutomationTraces(automation_entity_id);
+        traces = await haAutomationTraces(automation_entity_id, { includeLatestFull: include_raw_traces ?? false });
         trace = pickMostRecentTrace(traces);
       } catch (e: any) {
         traces = { error: String(e?.message ?? e) };
@@ -196,7 +238,10 @@ export function registerTools(mcp: McpServer) {
           const raw = await haAutomationConfig(automation_entity_id);
           config = wantRawConfig ? raw : sanitizeAutomationConfig(raw);
         } catch (e: any) {
-          config = { error: String(e?.message ?? e) };
+          config = {
+            error: String(e?.message ?? e),
+            hint: "A 404 usually means the automation is defined in YAML (e.g. /config/packages/), not the UI. Use ha_find_file / ha_grep_file on its id or alias.",
+          };
         }
       }
 
@@ -219,17 +264,167 @@ export function registerTools(mcp: McpServer) {
         evidence: {
           trace_sample: trace
             ? {
+              run_id: trace?.run_id ?? null,
               timestamp: trace?.timestamp ?? trace?.time ?? trace?.created ?? null,
+              script_execution: trace?.script_execution ?? null,
+              last_step: trace?.last_step ?? null,
+              trigger: trace?.trigger ?? null,
               result: trace?.result ?? null,
               error: trace?.error ?? trace?.result?.error ?? null,
               failed_step: trace?.failed_step ?? trace?.result?.failed_step ?? null,
             }
             : null,
 
+          recent_runs: Array.isArray(traces?.traces)
+            ? [...traces.traces]
+              .sort((a: any, b: any) => traceStartMs(b) - traceStartMs(a))
+              .slice(0, 5)
+              .map((t: any) => ({
+                run_id: t?.run_id ?? null,
+                start: t?.timestamp?.start ?? null,
+                finish: t?.timestamp?.finish ?? null,
+                script_execution: t?.script_execution ?? null,
+                last_step: t?.last_step ?? null,
+                error: t?.error ?? null,
+              }))
+            : undefined,
+
           raw_traces: include_raw_traces ? traces : undefined,
           logbook_sample: Array.isArray(logbook) ? logbook.slice(0, 20) : logbook,
           history_sample: history,
         },
+      };
+    },
+  });
+
+  defineTool(mcp, {
+    name: "ha_get_history",
+    description:
+      "Get recorded state history for one or more entities over a time window, as compact [timestamp, state] points (timestamps are UTC). Use this to find exactly when a sensor crossed a threshold.",
+    params: {
+      entity_ids: z.array(z.string().min(1)).min(1).max(10).describe("Entity ids to fetch (max 10)"),
+      start: z.string().optional().describe("Window start, ISO 8601 with timezone offset (e.g. 2026-10-09T09:40:00+02:00). Overrides since_hours."),
+      end: z.string().optional().describe("Window end, ISO 8601 with timezone offset (default: now)"),
+      since_hours: z.number().min(0.01).max(168).optional().describe("Look back this many hours from end when start is not given (default: 3, max: 168)"),
+      significant_changes_only: z.boolean().optional().describe("Set false to include every recorded state change (HA default drops some attribute-only/insignificant changes)"),
+      max_points: z.number().min(1).max(5000).optional().describe("Max points per entity (default: 2000). If exceeded, the earliest points are returned and truncated=true; narrow the window to see the rest."),
+    },
+    handler: async ({ entity_ids, start, end, since_hours, significant_changes_only, max_points }) => {
+      const { startIso, endIso } = resolveWindow({ start, end, since_hours }, 3);
+      const cap = max_points ?? 2000;
+
+      const raw = (await haHistoryPeriod({
+        startIso,
+        endIso,
+        entityIds: entity_ids,
+        minimalResponse: true,
+        noAttributes: true,
+        significantChangesOnly: significant_changes_only,
+      })) as any[];
+
+      const series = (Array.isArray(raw) ? raw : []).map((states: any[]) => {
+        const all = Array.isArray(states) ? states : [];
+        const points = all
+          .slice(0, cap)
+          .map((s: any) => [s?.last_changed ?? s?.last_updated ?? null, s?.state ?? null]);
+        return {
+          entity_id: all[0]?.entity_id ?? null,
+          total_points: all.length,
+          returned_points: points.length,
+          truncated: all.length > cap,
+          points,
+        };
+      });
+
+      // minimal_response only names the entity on the first state of each series; fall back to request order
+      series.forEach((s, i) => { if (!s.entity_id) s.entity_id = entity_ids[i] ?? null; });
+
+      return {
+        window: { start: startIso, end: endIso },
+        timezone_note: "All timestamps are UTC as returned by Home Assistant.",
+        series,
+        missing_entities: entity_ids.filter((id) => !series.some((s) => s.entity_id === id)),
+      };
+    },
+  });
+
+  defineTool(mcp, {
+    name: "ha_get_logbook",
+    description:
+      "Get Home Assistant logbook entries for a time window (timestamps are UTC), optionally for one entity and/or filtered by text. Use search='started' or 'stopped' to find Home Assistant restarts, or an automation name to see when it ran.",
+    params: {
+      start: z.string().optional().describe("Window start, ISO 8601 with timezone offset. Overrides since_hours."),
+      end: z.string().optional().describe("Window end, ISO 8601 with timezone offset (default: now)"),
+      since_hours: z.number().min(0.01).max(168).optional().describe("Look back this many hours from end when start is not given (default: 6, max: 168)"),
+      entity_id: z.string().min(1).optional().describe("Only entries for this entity"),
+      search: z.string().min(1).optional().describe("Case-insensitive text filter applied to name, message, state, entity_id and domain"),
+      limit: z.number().min(1).max(500).optional().describe("Max entries to return (default: 100). Earliest entries first."),
+    },
+    handler: async ({ start, end, since_hours, entity_id, search, limit }) => {
+      const { startIso, endIso } = resolveWindow({ start, end, since_hours }, 6);
+      const lim = limit ?? 100;
+
+      const raw = (await haLogbook({ startIso, endIso, entityId: entity_id })) as any[];
+      const entries = Array.isArray(raw) ? raw : [];
+
+      const q = search?.toLowerCase();
+      const matched = q
+        ? entries.filter((e: any) =>
+          [e?.name, e?.message, e?.state, e?.entity_id, e?.domain]
+            .some((f) => typeof f === "string" && f.toLowerCase().includes(q)))
+        : entries;
+
+      return {
+        window: { start: startIso, end: endIso },
+        timezone_note: "All timestamps are UTC as returned by Home Assistant.",
+        total_in_window: entries.length,
+        matched: matched.length,
+        returned: Math.min(matched.length, lim),
+        truncated: matched.length > lim,
+        entries: matched.slice(0, lim).map((e: any) => ({
+          when: e?.when ?? null,
+          name: e?.name ?? null,
+          message: e?.message ?? null,
+          state: e?.state ?? null,
+          entity_id: e?.entity_id ?? null,
+          domain: e?.domain ?? null,
+        })),
+      };
+    },
+  });
+
+  defineTool(mcp, {
+    name: "ha_get_error_log",
+    description:
+      "Read the Home Assistant Core log for the CURRENT run only (it starts at the last Home Assistant start; it will not contain the shutdown that preceded it). Supports a regex filter and tail.",
+    params: {
+      search: z.string().min(1).optional().describe("Case-insensitive regex; only matching lines are returned"),
+      tail_lines: z.number().min(1).max(2000).optional().describe("Return only the last N (matching) lines (default: 200, max: 2000)"),
+    },
+    handler: async ({ search, tail_lines }) => {
+      const text = await haErrorLog();
+      // eslint-disable-next-line no-control-regex
+      const lines = text.replace(/\x1b\[[0-9;]*m/g, "").split("\n");
+
+      let re: RegExp | null = null;
+      if (search) {
+        try {
+          re = new RegExp(search, "i");
+        } catch (e: any) {
+          throw new Error(`Invalid regex '${search}': ${String(e?.message ?? e)}`);
+        }
+      }
+
+      const matched = re ? lines.filter((l) => re!.test(l)) : lines;
+      const n = tail_lines ?? 200;
+      const out = matched.slice(-n);
+
+      return {
+        note: "Current run only; entries before the last Home Assistant start are not included.",
+        total_lines: lines.length,
+        matched: matched.length,
+        returned: out.length,
+        lines: out,
       };
     },
   });

@@ -434,7 +434,8 @@ app.post("/fs/replace", async (req, res) => {
 
     const newContent = replace_all
       ? content.split(old_string).join(new_string)
-      : content.replace(old_string, new_string);
+      // function replacer so `$&`, `$1`, `$$` etc. in new_string are inserted literally
+      : content.replace(old_string, () => new_string);
 
     await fs.writeFile(normalized, newContent, "utf-8");
     const stat = await fs.stat(normalized);
