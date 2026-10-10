@@ -10,10 +10,12 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 
 import { registerTools } from "./mcpTools.js";
+import { checkToken, parseAllowedOrigins, requireBearerToken } from "./auth.js";
 
 const PORT = Number(process.env.PORT || 3000);
 const LOG_LEVEL = process.env.LOG_LEVEL || "info";
-const ALLOW_ORIGIN = process.env.ALLOW_ORIGIN || "*";
+const AUTH_TOKEN = process.env.AUTH_TOKEN;
+const { origins: ALLOWED_ORIGINS, wildcardIgnored } = parseAllowedOrigins(process.env.ALLOW_ORIGIN);
 
 /************************/
 /** Helper Functions */
@@ -23,8 +25,22 @@ function log(...args: any[]) {
 }
 
 const app = express();
+
+// 1) CORS: only the listed origins get CORS headers; with none listed, browsers are not granted cross-origin access.
+if (ALLOWED_ORIGINS.length) {
+  app.use(
+    cors({
+      origin: ALLOWED_ORIGINS,
+      allowedHeaders: ["Content-Type", "Authorization", "Accept", "Mcp-Session-Id"],
+      exposedHeaders: ["Mcp-Session-Id"],
+    })
+  );
+}
+// 2) Bearer token for everything except / and /health (fails closed with 503 if no token is configured).
+//    Runs before body parsing so unauthenticated callers cannot make the server parse large bodies.
+app.use(requireBearerToken(AUTH_TOKEN, (msg) => console.warn(msg)));
+// 3) Body parsing
 app.use(express.json({ limit: "5mb" }));
-app.use(cors({ origin: ALLOW_ORIGIN }));
 app.use((err: any, _req: any, _res: any, _next: any) => {
   console.error("express error:", err);
 });
@@ -454,4 +470,21 @@ app.post("/fs/replace", async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Home Automation Diagnostics MCP listening on :${PORT} (endpoint /mcp)`);
+  const tokenCheck = checkToken(AUTH_TOKEN);
+  if (tokenCheck.error) {
+    console.error(`auth: ${tokenCheck.error} Every route except / and /health returns 503 until it is fixed.`);
+  } else if (tokenCheck.token) {
+    console.log("auth: bearer token required on every route except / and /health");
+    if (tokenCheck.warning) console.warn(`auth: ${tokenCheck.warning}`);
+  } else {
+    console.warn("auth: NO TOKEN CONFIGURED - every route except / and /health returns 503. Set the add-on option `auth_token`.");
+  }
+  if (ALLOWED_ORIGINS.length) {
+    console.log(`cors: allowed origins: ${ALLOWED_ORIGINS.join(", ")}`);
+  } else {
+    console.log("cors: no cross-origin browser access (allow_origin is empty)");
+  }
+  if (wildcardIgnored) {
+    console.warn("cors: allow_origin contains '*', which is ignored; list explicit origins instead.");
+  }
 });
