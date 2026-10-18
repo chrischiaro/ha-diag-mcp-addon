@@ -1,7 +1,7 @@
 name: "Home Automation Diagnostics MCP"
 slug: "ha_diag_mcp"
 description: "MCP server providing Home Assistant diagnostics tools over Streamable HTTP"
-version: "0.1.28"
+version: "0.1.29"
 startup: application
 boot: auto
 init: false
@@ -26,6 +26,10 @@ map:
 # ha_diag_addon_url: no longer used (the tools call /fs/* over loopback); kept so existing installs still validate.
 # allow_origin: comma-separated list of exact browser origins allowed cross-origin access. Empty = none.
 #   A wildcard (*) is ignored.
+# read_only_token: optional. When set, a second, READ-ONLY instance starts on port 3001 (no write tools, no
+#   /fs/write or /fs/replace, file access limited to an allow-list that excludes secrets and hidden files).
+#   It must differ from `auth_token`. Expose THIS port (3001), never 3000, if you want read-only remote access.
+# read_only_extra_paths: optional comma-separated entries under /config to add to the read-only allow-list.
 options:
   log_level: info
   allow_origin: ""
@@ -34,13 +38,17 @@ options:
 schema:
   log_level: list(trace|debug|info|warn|error)
   auth_token: password?
+  read_only_token: password?
+  read_only_extra_paths: str?
   allow_origin: str?
   ha_diag_addon_url: str
 
 ports:
   3000/tcp: 3000
+  3001/tcp: 3001
 ports_description:
-  3000/tcp: "Home Automation Diagnostics MCP"
+  3000/tcp: "Home Automation Diagnostics MCP (full access, keep on LAN)"
+  3001/tcp: "Home Automation Diagnostics MCP (read-only; only starts when read_only_token is set)"
 
 host_network: false
 

@@ -2,7 +2,8 @@ import { z } from "zod";
 import yaml from "js-yaml";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
-import { defineTool } from "./toolkit.js";
+import { defineTool as defineToolRaw } from "./toolkit.js";
+import { WRITE_TOOLS } from "./readonly.js";
 import { addonHeaders, selfUrl } from "./auth.js";
 import {
   haAutomationConfig,
@@ -147,7 +148,11 @@ function summarizeTraceFailure(trace: any) {
  * - stdio.ts (Claude local client)
  * - index.ts (HAOS add-on HTTP MCP)
  */
-export function registerTools(mcp: McpServer) {
+export function registerTools(mcp: McpServer, opts: { readOnly?: boolean } = {}) {
+  // In read-only mode the write tools are never registered, so they are not listed and cannot be called.
+  const defineTool: typeof defineToolRaw = ((m: McpServer, spec: { name: string }) =>
+    opts.readOnly && WRITE_TOOLS.has(spec.name) ? undefined : defineToolRaw(m, spec as any)) as any;
+
   defineTool(mcp, {
     name: "ha_get_state",
     description: "Get the current state and attributes of a Home Assistant entity by entity_id.",

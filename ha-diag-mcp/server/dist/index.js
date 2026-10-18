@@ -9,6 +9,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { registerTools } from "./mcpTools.js";
 import { checkToken, parseAllowedOrigins, requireBearerToken } from "./auth.js";
+import { READ_ONLY, readPolicy, MAX_READ_ONLY_PATTERN_LENGTH } from "./readonly.js";
 const PORT = Number(process.env.PORT || 3000);
 const LOG_LEVEL = process.env.LOG_LEVEL || "info";
 const AUTH_TOKEN = process.env.AUTH_TOKEN;
@@ -32,6 +33,12 @@ if (ALLOWED_ORIGINS.length) {
 // 2) Bearer token for everything except / and /health (fails closed with 503 if no token is configured).
 //    Runs before body parsing so unauthenticated callers cannot make the server parse large bodies.
 app.use(requireBearerToken(AUTH_TOKEN, (msg) => console.warn(msg)));
+// 2b) Read-only instance: the write routes do not exist. (The write tools are not registered either.)
+if (READ_ONLY) {
+    app.use(["/fs/write", "/fs/replace"], (_req, res) => {
+        res.status(403).json({ error: "This instance is read-only" });
+    });
+}
 // 3) Body parsing
 app.use(express.json({ limit: "5mb" }));
 app.use((err, _req, _res, _next) => {
@@ -133,10 +140,10 @@ async function getOrCreateTransport(req, res) {
     if (!sessionId && isInitializeRequest(req.body)) {
         // Create a new McpServer instance for each session
         const mcp = new McpServer({
-            name: "home-automation-diagnostics",
+            name: READ_ONLY ? "home-automation-diagnostics-readonly" : "home-automation-diagnostics",
             version: "0.1.0",
         });
-        registerTools(mcp);
+        registerTools(mcp, { readOnly: READ_ONLY });
         let transport;
         transport = new StreamableHTTPServerTransport({
             sessionIdGenerator: () => randomUUID(),
@@ -206,10 +213,18 @@ app.post("/fs/read", async (req, res) => {
             return;
         }
         // Security: restrict to /config directory
-        const normalized = path.normalize(filePath);
+        let normalized = path.normalize(filePath);
         if (!normalized.startsWith("/config/") && normalized !== "/config") {
             res.status(403).json({ error: "Access denied: path must be within /config/" });
             return;
+        }
+        if (READ_ONLY) {
+            const p = readPolicy.resolve(normalized);
+            if (!p.ok) {
+                res.status(p.status).json({ error: p.error });
+                return;
+            }
+            normalized = p.real;
         }
         const stat = await fs.stat(normalized);
         if (!stat.isFile()) {
@@ -253,10 +268,20 @@ app.post("/fs/find", async (req, res) => {
             return;
         }
         const root = search_root || "/config";
-        const normalized = path.normalize(root);
+        let normalized = path.normalize(root);
         if (!normalized.startsWith("/config/") && normalized !== "/config") {
             res.status(403).json({ error: "Access denied: search_root must be within /config/" });
             return;
+        }
+        let realRoot = "";
+        if (READ_ONLY) {
+            const p = readPolicy.resolve(normalized, { allowRoot: true });
+            if (!p.ok) {
+                res.status(p.status).json({ error: p.error });
+                return;
+            }
+            normalized = p.real;
+            realRoot = (await fs.realpath("/config"));
         }
         const results = [];
         const maxResults = 50;
@@ -268,6 +293,9 @@ app.post("/fs/find", async (req, res) => {
                 if (results.length >= maxResults)
                     break;
                 const fullPath = path.join(dir, entry.name);
+                // Read-only: skip anything outside the allow-list; symlinks are not followed (not reported as files/dirs).
+                if (READ_ONLY && !readPolicy.allowedRel(path.relative(realRoot, fullPath), { allowRoot: false }))
+                    continue;
                 if (entry.isFile() && entry.name.includes(filename)) {
                     results.push(fullPath);
                 }
@@ -295,10 +323,22 @@ app.post("/fs/grep", async (req, res) => {
             return;
         }
         // Security: restrict to /config directory
-        const normalized = path.normalize(filePath);
+        let normalized = path.normalize(filePath);
         if (!normalized.startsWith("/config/") && normalized !== "/config") {
             res.status(403).json({ error: "Access denied: path must be within /config/" });
             return;
+        }
+        if (READ_ONLY) {
+            if (pattern.length > MAX_READ_ONLY_PATTERN_LENGTH) {
+                res.status(400).json({ error: `pattern too long (max ${MAX_READ_ONLY_PATTERN_LENGTH} characters)` });
+                return;
+            }
+            const p = readPolicy.resolve(normalized);
+            if (!p.ok) {
+                res.status(p.status).json({ error: p.error });
+                return;
+            }
+            normalized = p.real;
         }
         const content = await fs.readFile(normalized, "utf-8");
         const lines = content.split("\n");
@@ -418,7 +458,7 @@ app.post("/fs/replace", async (req, res) => {
     }
 });
 app.listen(PORT, () => {
-    console.log(`Home Automation Diagnostics MCP listening on :${PORT} (endpoint /mcp)`);
+    console.log(`Home Automation Diagnostics MCP listening on :${PORT} (endpoint /mcp)${READ_ONLY ? " [READ-ONLY]" : ""}`);
     const tokenCheck = checkToken(AUTH_TOKEN);
     if (tokenCheck.error) {
         console.error(`auth: ${tokenCheck.error} Every route except / and /health returns 503 until it is fixed.`);

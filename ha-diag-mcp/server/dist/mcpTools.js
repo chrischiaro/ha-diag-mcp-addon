@@ -1,6 +1,7 @@
 import { z } from "zod";
 import yaml from "js-yaml";
-import { defineTool } from "./toolkit.js";
+import { defineTool as defineToolRaw } from "./toolkit.js";
+import { WRITE_TOOLS } from "./readonly.js";
 import { addonHeaders, selfUrl } from "./auth.js";
 import { haAutomationConfig, haAutomationTraces, haLogbook, haHistoryPeriod, haRepairsListIssues, haServices, haState, haStates, sanitizeAutomationConfig, supervisorHostInfo, toIsoFromMillis, haCallService, haRenderTemplate, haErrorLog, } from "./ha.js";
 // trace/list items carry timestamp as { start, finish }; older heuristics used a plain string.
@@ -111,7 +112,9 @@ function summarizeTraceFailure(trace) {
  * - stdio.ts (Claude local client)
  * - index.ts (HAOS add-on HTTP MCP)
  */
-export function registerTools(mcp) {
+export function registerTools(mcp, opts = {}) {
+    // In read-only mode the write tools are never registered, so they are not listed and cannot be called.
+    const defineTool = ((m, spec) => opts.readOnly && WRITE_TOOLS.has(spec.name) ? undefined : defineToolRaw(m, spec));
     defineTool(mcp, {
         name: "ha_get_state",
         description: "Get the current state and attributes of a Home Assistant entity by entity_id.",
