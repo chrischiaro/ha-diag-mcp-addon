@@ -14,6 +14,15 @@ if bashio::config.has_value 'allow_origin'; then
   ALLOW_ORIGIN="$(bashio::config 'allow_origin')"
 fi
 
+RO_TOKEN=""
+if bashio::config.has_value 'read_only_token'; then
+  RO_TOKEN="$(bashio::config 'read_only_token')"
+fi
+RO_EXTRA_PATHS=""
+if bashio::config.has_value 'read_only_extra_paths'; then
+  RO_EXTRA_PATHS="$(bashio::config 'read_only_extra_paths')"
+fi
+
 export LOG_LEVEL
 export ALLOW_ORIGIN
 export HA_DIAG_ADDON_URL
@@ -25,4 +34,26 @@ bashio::log.info "Starting HA Diagnostics MCP v$(bashio::addon.version) (log_lev
 bashio::log.info "Dist listing:"
 ls -al /app/server/dist || true
 
-node /app/server/dist/index.js
+# Optional read-only instance on 3001 with its own token. It never gets the full-access token, and a read-only
+# token equal to the full-access one would defeat the split, so refuse to start it in that case.
+RO_PID=""
+if [ -n "${RO_TOKEN}" ]; then
+  if [ "${RO_TOKEN}" = "${AUTH_TOKEN}" ]; then
+    bashio::log.error "read_only_token must differ from auth_token; read-only instance NOT started."
+  else
+    bashio::log.info "Starting read-only instance on :3001"
+    PORT=3001 READ_ONLY=true AUTH_TOKEN="${RO_TOKEN}" HA_DIAG_AUTH_TOKEN="${RO_TOKEN}" \
+      READ_ONLY_EXTRA_PATHS="${RO_EXTRA_PATHS}" node /app/server/dist/index.js &
+    RO_PID=$!
+  fi
+fi
+
+node /app/server/dist/index.js &
+MAIN_PID=$!
+
+# If either server exits, stop the add-on so the Supervisor restarts it and the failure is visible.
+wait -n
+status=$?
+bashio::log.error "A server process exited (status ${status}); stopping add-on."
+kill "${MAIN_PID}" ${RO_PID:+"${RO_PID}"} 2>/dev/null || true
+exit "${status}"

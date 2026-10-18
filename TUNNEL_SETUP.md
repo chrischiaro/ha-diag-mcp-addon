@@ -1,5 +1,9 @@
 # HA Diagnostics MCP — External Access Setup
 
+> **Status:** the `mcp.chiaro.us` route described in sections 1–5 below has been **removed**; port 3000 (full access) is
+> LAN-only and is no longer exposed through the tunnel. Those sections are kept as historical reference. For remote
+> access use the read-only instance described at the end of this document.
+
 ## Overview
 
 The `ha-diag-mcp` addon runs inside Home Assistant as an HTTP MCP server on port 3000. This document describes how it was exposed externally via Cloudflare Tunnel, and how it was wired into Claude Code and OpenClaw.
@@ -145,3 +149,16 @@ The addon exposes these tools to any connected AI client:
 - The local `uvx ha-mcp` server (in `~/.claude/settings.json`) still exists and connects via local network IP. The tunnel (`ha-mcp-tunnel`) provides the same access remotely.
 - Nabu Casa remote access (`ofq3wqd2uc9cgfkylisv8mm4jth8yali.ui.nabu.casa`) remains active but is now redundant for remote HA UI access — `ha.chiaro.us` serves the same purpose via Cloudflare Tunnel.
 - The addon is published at: https://github.com/chrischiaro/ha-diag-mcp-addon
+
+---
+
+## Read-only instance (for remote/mobile diagnostics)
+
+Set the add-on option `read_only_token` (different from `auth_token`; `openssl rand -hex 32`) and a second instance starts on **port 3001**:
+
+- no write tools (`ha_write_file`, `ha_replace_in_file`, `ha_call_service` are not registered), and `/fs/write` / `/fs/replace` return 403
+- file tools only reach an allow-list under `/config` (`configuration.yaml`, `automations.yaml`, `scripts.yaml`, `scenes.yaml`, `packages/`, `blueprints/`, `custom_components/`, `dashboards/`, `esphome/`, `home-assistant.log*`); hidden paths (`.storage`, `.cloud`, ...), `secrets*.yaml`, keys and databases are always refused, and symlinks are resolved before the check
+- extend the allow-list with `read_only_extra_paths` (comma-separated, relative to `/config`)
+
+Point a tunnel hostname at `http://homeassistant:3001` only. Keep port 3000 (full access) off the tunnel.
+`ha_evaluate_template` and the state/history/logbook tools remain available; they read any entity, so treat that as part of what is exposed.
